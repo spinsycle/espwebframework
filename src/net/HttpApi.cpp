@@ -286,31 +286,7 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry
     sendJson(r, d);
   });
 
-  server_->on("/api/v1/automation", HTTP_GET, [at](AsyncWebServerRequest* r) {
-    AsyncResponseStream* s = r->beginResponseStream("application/json");
-    s->addHeader("Cache-Control", "no-store");
-    {
-      JsonDocument d;
-      AutomationStore::settingsToJson(at->settings(), d.to<JsonObject>());
-      d["schema_version"] = kConfigSchema;
-      String head;
-      serializeJson(d, head);
-      head.remove(head.length() - 1);  // without the closing brace: the rules follow
-      s->print(head);
-      s->print(",\"rules\":[");
-    }
-    Rule* rule = new (std::nothrow) Rule;  // one rule at a time, off the small stack
-    for (size_t i = 0; rule && at->ruleAt(i, *rule); i++) {
-      JsonDocument d;
-      AutomationStore::ruleToJson(*rule, d.to<JsonObject>());
-      if (i) s->print(',');
-      serializeJson(d, *s);
-    }
-    delete rule;
-    s->print("]}");
-    r->send(s);
-  });
-
+  // The status route is registered before the config route: this server matches a route as a prefix of longer paths.
   server_->on("/api/v1/automation/status", HTTP_GET, [at](AsyncWebServerRequest* r) {
     AsyncResponseStream* s = r->beginResponseStream("application/json");
     s->addHeader("Cache-Control", "no-store");
@@ -336,6 +312,31 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry
       if (i) s->print(',');
       serializeJson(d, *s);
     }
+    s->print("]}");
+    r->send(s);
+  });
+
+  server_->on("/api/v1/automation", HTTP_GET, [at](AsyncWebServerRequest* r) {
+    AsyncResponseStream* s = r->beginResponseStream("application/json");
+    s->addHeader("Cache-Control", "no-store");
+    {
+      JsonDocument d;
+      AutomationStore::settingsToJson(at->settings(), d.to<JsonObject>());
+      d["schema_version"] = kConfigSchema;
+      String head;
+      serializeJson(d, head);
+      head.remove(head.length() - 1);  // without the closing brace: the rules follow
+      s->print(head);
+      s->print(",\"rules\":[");
+    }
+    Rule* rule = new (std::nothrow) Rule;  // one rule at a time, off the small stack
+    for (size_t i = 0; rule && at->ruleAt(i, *rule); i++) {
+      JsonDocument d;
+      AutomationStore::ruleToJson(*rule, d.to<JsonObject>());
+      if (i) s->print(',');
+      serializeJson(d, *s);
+    }
+    delete rule;
     s->print("]}");
     r->send(s);
   });
