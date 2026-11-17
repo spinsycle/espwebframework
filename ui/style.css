@@ -76,3 +76,21 @@ dt{color:var(--dim)} dd{margin:0;word-break:break-word}
   .dgrid{display:flex;flex-direction:column}
   .dc{min-height:calc(var(--h,1) * 88px)}
 }
+
+.inline{display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin:8px 0}
+.rules{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.rule{display:grid;gap:6px}
+.rule.off{opacity:.6}
+.rule .top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.rule .desc{font-size:15px}
+.rbar{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
+.rbar button,#aadd,#aeform button:not([type=submit]),.lock button{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:7px 12px;font:inherit;font-size:14px}
+#aeditor{margin:16px 0}
+#aeform{max-width:560px}
+#aeform h4{margin:8px 0 0;color:var(--dim);font-size:13px;text-transform:uppercase;letter-spacing:.04em}
+.sub{border:1px solid var(--line);border-radius:8px;display:grid;gap:8px;padding:10px;margin:0}
+.days{display:flex;gap:10px;flex-wrap:wrap}
+.lock{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0}
+.events{margin:0;padding-left:18px;color:var(--dim)}
+#amsg,#aformmsg{min-height:1.4em;color:var(--dim)}
+#amsg.err,#aformmsg.err{color:var(--bad)}

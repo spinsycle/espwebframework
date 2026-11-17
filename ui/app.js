@@ -21,6 +21,7 @@ document.querySelectorAll("#tabs button").forEach((b) =>
     document.querySelectorAll("#tabs button").forEach((x) => x.classList.toggle("on", x === b));
     document.querySelectorAll("main > section").forEach((s) => (s.hidden = s.id !== b.dataset.tab));
     if (b.dataset.tab === "dash") dashShow();
+    if (b.dataset.tab === "automation") autoShow();
     if (b.dataset.tab === "dev") showDevices();
     if (b.dataset.tab === "net") loadNet();
     if (b.dataset.tab === "sys") loadSys();

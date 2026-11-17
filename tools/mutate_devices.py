@@ -2,7 +2,7 @@
 Run: python tools/mutate_devices.py          (needs g++ on PATH). Exit 1 if any mutant survives or a baseline fails.
 Each set = (source file, test folder, mutants). Mutants are (name, old text that occurs exactly once, new text).
 """
-import os, subprocess, sys, time
+import os, re, subprocess, sys, time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -233,6 +233,158 @@ DASH = [
     ("field device", 'case DashErr::Device: return "binding.device";', 'case DashErr::Device: return "device";'),
 ]
 
+# P7: automation rules (validation, command building, comparison) and the engine.
+AUTO_RULES = [
+    ("cmp gt", "case Op::Gt: return a > b;", "case Op::Gt: return a >= b;"),
+    ("cmp lt", "case Op::Lt: return a < b;", "case Op::Lt: return a <= b;"),
+    ("cmp ge", "case Op::Ge: return a >= b - 1e-4;", "case Op::Ge: return a > b;"),
+    ("cmp le", "case Op::Le: return a <= b + 1e-4;", "case Op::Le: return a < b;"),
+    ("cmp eq", "case Op::Eq: return fabs(a - b) < 1e-4;", "case Op::Eq: return fabs(a - b) < 1;"),
+    ("cmp ne", "case Op::Ne: return fabs(a - b) >= 1e-4;", "case Op::Ne: return fabs(a - b) >= 1;"),
+    ("numeric prop", "return p != Prop::None && p != Prop::Text && p != Prop::kCount;", "return p != Prop::None && p != Prop::kCount;"),
+    ("text printable low", "if (uint8_t(*p) < 0x20 || uint8_t(*p) > 0x7E) return false;", "if (uint8_t(*p) < 0x1F || uint8_t(*p) > 0x7E) return false;"),
+    ("text printable high", "if (uint8_t(*p) < 0x20 || uint8_t(*p) > 0x7E) return false;", "if (uint8_t(*p) < 0x20 || uint8_t(*p) > 0x7F) return false;"),
+    ("text empty", "if (!allowEmpty && !s[0]) return false;", ""),
+    ("text terminated", "if (!memchr(s, 0, cap)) return false;", ""),
+    ("cmd onoff value", "out.value = a.type == ActType::On ? 1 : 0;", "out.value = a.type == ActType::On ? 0 : 1;"),
+    ("cmd set servo", "if (t != DeviceType::Pwm && t != DeviceType::Motor && t != DeviceType::Servo) return false;", "if (t != DeviceType::Pwm && t != DeviceType::Motor) return false;"),
+    # The per-device-type checks in buildCommand are also enforced by checkCommand (defence in depth), so removing
+    # one alone changes nothing: only removing the final check is a real mutant.
+    ("cmd final check", "return checkCommand(t, out) == CmdErr::Ok;", "return true;"),
+    ("time empty window", "if (c.from > 1439 || c.to > 1439 || c.from == c.to) return AutoErr::Time;", "if (c.from > 1439 || c.to > 1439) return AutoErr::Time;"),
+    ("time from range", "if (c.from > 1439 || c.to > 1439 || c.from == c.to) return AutoErr::Time;", "if (c.from > 1440 || c.to > 1439 || c.from == c.to) return AutoErr::Time;"),
+    ("time to range", "if (c.from > 1439 || c.to > 1439 || c.from == c.to) return AutoErr::Time;", "if (c.from > 1439 || c.to > 1440 || c.from == c.to) return AutoErr::Time;"),
+    ("time days empty", "if (!(c.days & 0x7F) || (c.days & 0x80)) return AutoErr::Days;", "if ((c.days & 0x80)) return AutoErr::Days;"),
+    ("time days high", "if (!(c.days & 0x7F) || (c.days & 0x80)) return AutoErr::Days;", "if (!(c.days & 0x7F)) return AutoErr::Days;"),
+    ("cond device", "if (!textOk(c.device, kIdCap, false) || !find(ctx, c.device, d)) return AutoErr::Device;", "if (!textOk(c.device, kIdCap, false)) return AutoErr::Device;"),
+    ("cond prop offered", "if (!numericProp(c.prop) || !devicePropAccess(d, c.prop, w)) return AutoErr::Prop;", "if (!numericProp(c.prop)) return AutoErr::Prop;"),
+    ("cond prop numeric", "if (!numericProp(c.prop) || !devicePropAccess(d, c.prop, w)) return AutoErr::Prop;", "if (!devicePropAccess(d, c.prop, w)) return AutoErr::Prop;"),
+    ("cond op", "if (uint8_t(c.op) >= uint8_t(Op::kCount)) return AutoErr::Op;", ""),
+    ("cond finite", "if (!isfinite(c.value) || c.value < -1e6f || c.value > 1e6f) return AutoErr::Value;", "if (c.value < -1e6f || c.value > 1e6f) return AutoErr::Value;"),
+    ("cond value hi", "c.value < -1e6f || c.value > 1e6f) return AutoErr::Value;", "c.value < -1e6f) return AutoErr::Value;"),
+    ("cond value lo", "c.value < -1e6f || c.value > 1e6f) return AutoErr::Value;", "c.value > 1e6f) return AutoErr::Value;"),
+    ("cond duration max", "if (c.forS > 86400) return AutoErr::Duration;", "if (c.forS > 86401) return AutoErr::Duration;"),
+    ("cond duration when", "if (c.forS > 0 && !whenRule) return AutoErr::Duration;", ""),
+    ("action event text", "if (a.type == ActType::Event) return textOk(a.text, kActTextCap, false) ? AutoErr::Ok : AutoErr::Value;", "if (a.type == ActType::Event) return AutoErr::Ok;"),
+    ("action device", "if (!textOk(a.device, kIdCap, false) || !find(ctx, a.device, d)) return AutoErr::Device;", "if (!textOk(a.device, kIdCap, false)) return AutoErr::Device;"),
+    ("action send text", "if (a.type == ActType::Send && !textOk(a.text, kActTextCap, false)) return AutoErr::Value;", ""),
+    ("action set finite", "if (a.type == ActType::Set && !isfinite(a.value)) return AutoErr::Value;", ""),
+    ("action fits device", "return buildCommand(a, d.type, c) ? AutoErr::Ok : AutoErr::Action;", "return AutoErr::Ok;"),
+    ("action type", "if (uint8_t(a.type) >= uint8_t(ActType::kCount)) return AutoErr::Action;", ""),
+    ("trig change device", "if (!textOk(t.device, kIdCap, false) || !find(ctx, t.device, d)) return AutoErr::Device;", "if (!textOk(t.device, kIdCap, false)) return AutoErr::Device;"),
+    ("trig change prop", "if (!numericProp(t.prop) || !devicePropAccess(d, t.prop, w)) return AutoErr::Prop;", "if (!numericProp(t.prop)) return AutoErr::Prop;"),
+    ("trig when needs cond", "case TrigType::When: return nConds >= 1 ? AutoErr::Ok : AutoErr::Conds;", "case TrigType::When: return AutoErr::Ok;"),
+    ("trig interval min", "return (t.everyS >= 1 && t.everyS <= 86400) ? AutoErr::Ok : AutoErr::Time;", "return (t.everyS >= 0 && t.everyS <= 86400) ? AutoErr::Ok : AutoErr::Time;"),
+    ("trig interval max", "return (t.everyS >= 1 && t.everyS <= 86400) ? AutoErr::Ok : AutoErr::Time;", "return (t.everyS >= 1 && t.everyS <= 86401) ? AutoErr::Ok : AutoErr::Time;"),
+    ("trig schedule minute", "if (t.minute > 1439) return AutoErr::Time;", "if (t.minute > 1440) return AutoErr::Time;"),
+    ("trig schedule days", "return ((t.days & 0x7F) && !(t.days & 0x80)) ? AutoErr::Ok : AutoErr::Days;", "return AutoErr::Ok;"),
+    ("rule id", "if (!textOk(r.id, kIdCap, false) || !detail::validDeviceId(r.id)) return AutoErr::Id;", "if (!textOk(r.id, kIdCap, false)) return AutoErr::Id;"),
+    ("rule name", "if (!textOk(r.name, kRuleNameCap, true)) return AutoErr::Name;", ""),
+    ("rule conds max", "if (r.nConds > kMaxConds) return AutoErr::Conds;", "if (r.nConds > kMaxConds + 1) return AutoErr::Conds;"),
+    ("rule actions min", "if (r.nActs < 1 || r.nActs > kMaxActions) return AutoErr::Actions;", "if (r.nActs > kMaxActions) return AutoErr::Actions;"),
+    ("rule actions max", "if (r.nActs < 1 || r.nActs > kMaxActions) return AutoErr::Actions;", "if (r.nActs < 1) return AutoErr::Actions;"),
+    ("rule cooldown", "if (r.cooldownS > 86400) return AutoErr::Cooldown;", "if (r.cooldownS > 86401) return AutoErr::Cooldown;"),
+    ("rule checks conds", "    e = validateCond(r.conds[i], find, ctx, r.trig.type == TrigType::When);", "    e = AutoErr::Ok;"),
+    ("rule checks actions", "    e = validateAction(r.acts[i], find, ctx);", "    e = AutoErr::Ok;"),
+    ("rule when flag", "validateCond(r.conds[i], find, ctx, r.trig.type == TrigType::When)", "validateCond(r.conds[i], find, ctx, true)"),
+    ("settings offset hi", "if (s.utcOffsetMin < -720 || s.utcOffsetMin > 840) return AutoErr::Offset;", "if (s.utcOffsetMin < -720) return AutoErr::Offset;"),
+    ("settings offset lo", "if (s.utcOffsetMin < -720 || s.utcOffsetMin > 840) return AutoErr::Offset;", "if (s.utcOffsetMin > 840) return AutoErr::Offset;"),
+    ("settings locks max", "if (s.nLocks > kMaxInterlocks) return AutoErr::Interlock;", "if (s.nLocks > kMaxInterlocks + 1) return AutoErr::Interlock;"),
+    ("settings lock self", "if (!strcmp(s.locks[i].a, s.locks[i].b)) return AutoErr::Interlock;", ""),
+    ("settings lock exists", "if (!find(ctx, s.locks[i].a, a) || !find(ctx, s.locks[i].b, b)) return AutoErr::Interlock;", ""),
+    ("settings lock relay", "if (a.type != DeviceType::Relay || b.type != DeviceType::Relay) return AutoErr::Interlock;", ""),
+    ("err code duplicate", 'case AutoErr::Duplicate: return "duplicate_id";', 'case AutoErr::Duplicate: return "duplicate";'),
+    ("err field days", 'case AutoErr::Days: return "days";', 'case AutoErr::Days: return "day";'),
+]
+
+AUTO_CORE = [
+    ("clock before ntp", "if (epochUtc < 1600000000UL) return false;", "if (epochUtc < 1UL) return false;"),
+    ("clock weekday", "ci.weekday = uint8_t((days + 4) % 7);", "ci.weekday = uint8_t((days + 3) % 7);"),
+    ("clock minute of day", "ci.minuteOfDay = uint16_t((local % 86400) / 60);", "ci.minuteOfDay = uint16_t((local % 86400) / 61);"),
+    ("clock offset", "int64_t local = int64_t(epochUtc) + int64_t(offsetMin) * 60;", "int64_t local = int64_t(epochUtc) - int64_t(offsetMin) * 60;"),
+    ("clock minute key", "ci.minuteKey = uint32_t(local / 60);", "ci.minuteKey = uint32_t(local / 3600);"),
+    ("add duplicate", "if (find(r.id) >= 0) return AutoErr::Duplicate;", ""),
+    ("add capacity", "if (n_ >= kMaxRules) return AutoErr::TooMany;", "if (n_ > kMaxRules) return AutoErr::TooMany;"),
+    ("add startup flag", "st_[n_].startupDone = started_;", "st_[n_].startupDone = false;"),
+    ("replace keeps startup", "    st_[i].startupDone = done;\n    dropVerifies(i);", "    dropVerifies(i);"),
+    ("replace drops verifies", "    st_[i].startupDone = done;\n    dropVerifies(i);", "    st_[i].startupDone = done;"),
+    ("remove drops verifies", "    dropVerifies(i);\n    for (size_t k = size_t(i) + 1;", "    for (size_t k = size_t(i) + 1;"),
+    ("remove shifts verifies", "      if (v.rule > i) v.rule--;", ""),
+    ("enable resets edge", "    st_[i].lastCond = false;", ""),
+    ("tick enabled switch", "    if (!settings.enabled) { runId_[0] = 0; return; }  // a \"run\" asked for while the engine is off is dropped, not saved up", ""),
+    ("tick drops run", "    if (!settings.enabled) { runId_[0] = 0; return; }  // a \"run\" asked for while the engine is off is dropped, not saved up", "    if (!settings.enabled) return;  // a \"run\" asked for while the engine is off is dropped, not saved up"),
+    ("tick rule enabled", "      if (!r.enabled) continue;", ""),
+    ("run needs enabled", "      if (i >= 0 && rules_[i].enabled) {", "      if (i >= 0) {"),
+    ("run checks conds", "        if (conds(size_t(i), env, now, ci, haveClock)) fire(size_t(i), env, now);", "        fire(size_t(i), env, now);"),
+    ("change first read", "          if (!s.havePrev) { s.havePrev = true; s.prev = float(v); break; }", ""),
+    ("change on change", "          if (float(v) != s.prev) {", "          if (true) {"),
+    ("change remembers", "            s.prev = float(v);\n            if (conds(i, env, now, ci, haveClock)) fire(i, env, now);", "            if (conds(i, env, now, ci, haveClock)) fire(i, env, now);"),
+    ("when edge", "          if (c && !s.lastCond) fire(i, env, now);", "          if (c) fire(i, env, now);"),
+    ("when remembers", "          s.lastCond = c;", ""),
+    ("interval start", "          if (!s.nextAt) { s.nextAt = now + every; break; }", "          if (!s.nextAt) { s.nextAt = now; break; }"),
+    ("interval step", "            s.nextAt += every;", "            s.nextAt += 0;"),
+    ("interval no burst", "            if (int32_t(now - s.nextAt) >= 0) s.nextAt = now + every;  // fell far behind: do not burst", ""),
+    ("interval zero", "          if (!every) break;  // validation forbids 0; never spin on it", ""),
+    ("schedule minute", "ci.minuteOfDay == r.trig.minute &&", "ci.minuteOfDay != r.trig.minute &&"),
+    ("schedule days", "((r.trig.days >> ci.weekday) & 1) &&", "true &&"),
+    ("schedule once", "ci.minuteKey != s.lastMinuteKey) {", "true) {"),
+    ("schedule remembers", "            s.lastMinuteKey = ci.minuteKey;", ""),
+    ("schedule clock", "          if (haveClock && ci.minuteOfDay == r.trig.minute", "          if (ci.minuteOfDay == r.trig.minute"),
+    ("startup delay", "          if (!s.startupDone && now >= kStartupMs) {", "          if (!s.startupDone) {"),
+    ("startup once", "            s.startupDone = true;", ""),
+    ("wifi first", "          if (s.lastWifi < 0) { s.lastWifi = cur; break; }", ""),
+    ("wifi direction", "            if ((cur == 1) == r.trig.wifiUp) {", "            if ((cur == 1) != r.trig.wifiUp) {"),
+    ("wifi remembers", "            s.lastWifi = cur;\n            if ((cur == 1)", "            if ((cur == 1)"),
+    ("time cond clock", "      if (!haveClock || !((c.days >> ci.weekday) & 1)) return false;", "      if (!((c.days >> ci.weekday) & 1)) return false;"),
+    ("time cond days", "      if (!haveClock || !((c.days >> ci.weekday) & 1)) return false;", "      if (!haveClock) return false;"),
+    ("time cond from", "return c.from < c.to ? (m >= c.from && m < c.to) : (m >= c.from || m < c.to);", "return c.from < c.to ? (m > c.from && m < c.to) : (m >= c.from || m < c.to);"),
+    ("time cond to", "return c.from < c.to ? (m >= c.from && m < c.to) : (m >= c.from || m < c.to);", "return c.from < c.to ? (m >= c.from && m <= c.to) : (m >= c.from || m < c.to);"),
+    ("time cond wrap", "return c.from < c.to ? (m >= c.from && m < c.to) : (m >= c.from || m < c.to);", "return c.from < c.to ? (m >= c.from && m < c.to) : (m >= c.from && m < c.to);"),
+    ("time cond wrap to", "(m >= c.from || m < c.to);", "(m >= c.from || m <= c.to);"),
+    ("cond reads", "    bool ok = env.read(c.device, c.prop, v) && compare(c.op, v, double(c.value));", "    bool ok = compare(c.op, v, double(c.value));"),
+    ("cond duration reset", "    if (!ok) { s.holding[k] = false; return false; }", "    if (!ok) return false;"),
+    ("cond duration start", "    if (!s.holding[k]) { s.holding[k] = true; s.since[k] = now; }", "    s.since[k] = now;"),
+    ("cond duration length", "return uint32_t(now - s.since[k]) >= c.forS * 1000UL;", "return uint32_t(now - s.since[k]) > c.forS * 1000UL;"),
+    ("cond none", "    if (r.nConds == 0) return true;", "    if (r.nConds == 0) return false;"),
+    ("cond any all", "    return r.matchAny ? any : all;", "    return r.matchAny ? all : any;"),
+    ("cond all evaluated", "      any = any || v;", "      any = any || v;\n      if (any && r.matchAny) break;"),
+    ("lock turns on", "    bool turnsOn = a.type == ActType::On;", "    bool turnsOn = true;"),
+    ("lock toggle", "    if (a.type == ActType::Toggle) turnsOn = env.read(a.device, Prop::State, v) && v < 0.5;", "    if (a.type == ActType::Toggle) turnsOn = env.read(a.device, Prop::State, v) && v > 0.5;"),
+    ("lock off allowed", "    if (!turnsOn) return false;", ""),
+    ("lock partner on", "      if (other && env.read(other, Prop::State, v) && v > 0.5) return true;", "      if (other && env.read(other, Prop::State, v) && v < 0.5) return true;"),
+    ("lock side a", "      const char* other = !strcmp(a.device, l.a) ? l.b : !strcmp(a.device, l.b) ? l.a : nullptr;", "      const char* other = !strcmp(a.device, l.a) ? l.b : nullptr;"),
+    ("lock side b", "      const char* other = !strcmp(a.device, l.a) ? l.b : !strcmp(a.device, l.b) ? l.a : nullptr;", "      const char* other = !strcmp(a.device, l.b) ? l.a : nullptr;"),
+    ("verify deadline", "      if (v.rule < 0 || int32_t(now - v.deadline) < 0) continue;", "      if (v.rule < 0) continue;"),
+    ("verify tolerance", "bool ok = env.read(v.dev, v.prop, x) && fabs(x - double(v.expect)) < 0.5;", "bool ok = true;"),
+    ("verify counts", "        st_[v.rule].unconfirmed++;", ""),
+    ("verify frees", "      v.rule = -1;\n    }\n  }\n\n  void fire", "    }\n  }\n\n  void fire"),
+    ("verify on", "      if (a.type == ActType::On) addVerify(ri, a.device, Prop::State, 1, now);", ""),
+    ("verify off", "      else if (a.type == ActType::Off) addVerify(ri, a.device, Prop::State, 0, now);", "      else if (a.type == ActType::Off) addVerify(ri, a.device, Prop::State, 1, now);"),
+    ("verify set", "      else if (a.type == ActType::Set) addVerify(ri, a.device, Prop::Level, a.value, now);", ""),
+    ("verify stop", "      else if (a.type == ActType::Stop) addVerify(ri, a.device, Prop::Level, 0, now);", ""),
+    ("verify window", "        v.deadline = now + kVerifyMs;", "        v.deadline = now;"),
+    ("fire cooldown", "if (since < kMinGapMs || (r.cooldownS && since < r.cooldownS * 1000UL)) { s.last = Last::Cooldown; return; }", "if (since < kMinGapMs) { s.last = Last::Cooldown; return; }"),
+    ("fire min gap", "if (since < kMinGapMs || (r.cooldownS && since < r.cooldownS * 1000UL)) { s.last = Last::Cooldown; return; }", "if ((r.cooldownS && since < r.cooldownS * 1000UL)) { s.last = Last::Cooldown; return; }"),
+    ("fire first", "    if (s.everFired) {\n      uint32_t since", "    if (false) {\n      uint32_t since"),
+    ("fire window", "    if (uint32_t(now - winStart_) >= 1000) { winStart_ = now; winCount_ = 0; }", "    if (uint32_t(now - winStart_) >= 1000) { winStart_ = now; }"),
+    ("fire storm limit", "    if (winCount_ >= kStormMax) {", "    if (winCount_ > kStormMax) {"),
+    ("fire counts window", "    winCount_++;", ""),
+    ("fire counter", "    s.fired++;", ""),
+    ("fire last ok", "    s.last = Last::Ok;", ""),
+    ("fire event action", "      if (a.type == ActType::Event) { log(env, now, r.id, EvKind::Custom, a.text); continue; }", "      if (a.type == ActType::Event) continue;"),
+    ("fire no device", "s.last = Last::NoDevice;", "s.last = Last::Ok;"),
+    ("fire blocked", "s.last = Last::Blocked;", "s.last = Last::Ok;"),
+    ("fire rejected", "        s.last = Last::Rejected;", "        s.last = Last::Ok;"),
+    ("fire command result", "if (!buildCommand(a, t, c) || env.command(a.device, c) != CmdErr::Ok) {", "if (!buildCommand(a, t, c) || env.command(a.device, c) == CmdErr::Ok) {"),
+    ("log ring", "    evHead_ = (evHead_ + 1) % kEvents;", "    evHead_ = (evHead_ + 1) % (kEvents + 1);"),
+    ("log count", "    if (evN_ < kEvents) evN_++;", ""),
+    ("log newest first", "return ev_[(evHead_ + kEvents - 1 - i) % kEvents];", "return ev_[(evHead_ + i) % kEvents];"),
+    ("storm constant", "static constexpr uint32_t kStormMax = 30;", "static constexpr uint32_t kStormMax = 300;"),
+    ("min gap constant", "static constexpr uint32_t kMinGapMs = 200;", "static constexpr uint32_t kMinGapMs = 20;"),
+    ("startup constant", "static constexpr uint32_t kStartupMs = 3000;", "static constexpr uint32_t kStartupMs = 30;"),
+    ("verify constant", "static constexpr uint32_t kVerifyMs = 1500;", "static constexpr uint32_t kVerifyMs = 15;"),
+]
+
 SETS = [
     ("devices", "src/devices/DeviceTypes.h", "test_devices", DEVICES),
     ("p4", "src/devices/DeviceTypes.h", "test_p4", P4),
@@ -240,6 +392,8 @@ SETS = [
     ("edit", "src/devices/DeviceTypes.h", "test_p5", EDIT),
     ("config rules", "src/config/ConfigRules.h", "test_p5", CONFIG),
     ("dashboard", "src/dashboard/DashboardRules.h", "test_p6", DASH),
+    ("automation rules", "src/automation/AutomationRules.h", "test_p7", AUTO_RULES),
+    ("automation core", "src/automation/AutomationCore.h", "test_p7", AUTO_CORE),
     ("queue", "src/devices/OpQueue.h", "test_ws", QUEUE),
     ("limiter", "src/net/RateLimiter.h", "test_ws", LIMITER),
 ]
@@ -249,8 +403,14 @@ def run_tests(folder):
                        cwd=ROOT, capture_output=True, text=True)
     return r.returncode == 0
 
+# MUT_ONLY=<regex on "set/mutant"> reruns just those mutants (a quick recheck after fixing survivors).
+ONLY = os.environ.get("MUT_ONLY")
 survivors, total = [], 0
 for label, rel, folder, mutants in SETS:
+    if ONLY:
+        mutants = [m for m in mutants if re.search(ONLY, label + "/" + m[0])]
+        if not mutants:
+            continue
     path = os.path.join(ROOT, rel)
     original = open(path, encoding="utf-8", newline="").read()
     if not run_tests(folder):

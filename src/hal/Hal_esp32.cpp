@@ -2,6 +2,7 @@
 #include "Hal.h"
 
 #include <Arduino.h>
+#include <time.h>
 #include <LittleFS.h>
 #include <esp_system.h>
 
@@ -79,6 +80,9 @@ bool uartBegin(int rxPin, int txPin, uint32_t baud) {
 void uartEnd() { Serial2.end(); }
 int uartRead() { return Serial2.available() ? Serial2.read() : -1; }
 void uartWrite(const char* s, size_t n) { Serial2.write(reinterpret_cast<const uint8_t*>(s), n); }
+
+void clockBegin() { configTime(0, 0, "pool.ntp.org", "time.nist.gov"); }  // the offset is applied by the automation engine
+uint32_t epochUtc() { return uint32_t(time(nullptr)); }
 
 }  // namespace hal
 }  // namespace espwf

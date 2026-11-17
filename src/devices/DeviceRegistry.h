@@ -5,6 +5,7 @@
 #include <ArduinoJson.h>
 
 #include "DeviceTypes.h"
+#include "dashboard/DashboardRules.h"
 #include "OpQueue.h"
 
 namespace espwf {
@@ -37,7 +38,10 @@ class DeviceRegistry {
 
   DevErr requestAdd(const DeviceConfig& cfg);
   DevErr requestRemove(const char* id);
-  bool config(const char* id, DeviceConfig& out) const;  // current config of one device; false if absent
+  bool config(const char* id, DeviceConfig& out) const;
+  // One reading as a number (on/off = 1/0), for the automation engine. False if there is no such device,
+  // it does not offer that property, or a sensor has no good reading right now.
+  bool readProp(const char* id, Prop p, double& out) const;  // current config of one device; false if absent
   DevErr requestUpdate(const DeviceConfig& cfg);          // edit in place: same id and type, new settings
 
   // Replace every device with `list` (already parsed). Validates all of it first; on any failure nothing

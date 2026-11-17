@@ -33,7 +33,7 @@ void test_schema_check() {
 // ---- factory reset list
 
 void test_config_files_listed() {
-  EQ(9, kConfigFileCount);
+  EQ(12, kConfigFileCount);
   TEST_ASSERT_TRUE(isConfigFile("/config/network.json"));
   TEST_ASSERT_TRUE(isConfigFile("/config/network.json.tmp"));
   TEST_ASSERT_TRUE(isConfigFile("/config/devices.json"));

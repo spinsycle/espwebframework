@@ -14,6 +14,7 @@
 <nav id="tabs">
   <button data-tab="dash" class="on">Dashboard</button>
   <button data-tab="dev">Devices</button>
+  <button data-tab="automation">Automation</button>
   <button data-tab="net">Network</button>
   <button data-tab="sys">System</button>
 </nav>
@@ -144,6 +145,33 @@
     </div>
   </section>
 
+  <section id="automation" hidden>
+    <div class="card">
+      <label class="row"><input id="aengine" type="checkbox"> Automation engine on</label>
+      <p id="aclock" class="hint">-</p>
+      <div class="inline">
+        <label>UTC offset (minutes) <input id="aoffset" type="number" min="-720" max="840" step="15"></label>
+        <button type="button" id="aoffsetsave">Save</button>
+      </div>
+      <small class="hint">No daylight saving: change this twice a year. UTC-5 is -300, UTC+1 is 60.</small>
+    </div>
+    <h3 class="sect">Rules</h3>
+    <p id="amsg" role="status"></p>
+    <p id="aempty" class="hint">No rules yet.</p>
+    <div id="alist" class="grid rules"></div>
+    <button type="button" id="aadd">Add rule</button>
+    <div id="aeditor" hidden>
+      <form id="aeform" autocomplete="off"></form>
+      <p id="aformmsg" role="status"></p>
+    </div>
+    <h3 class="sect">Interlocks</h3>
+    <small class="hint">An interlock stops a rule turning one relay on while the other is on. It does not stop the dashboard or the API.</small>
+    <div id="alocks"></div>
+    <div class="rbar"><button type="button" id="alockadd" hidden>+ interlock</button> <button type="button" id="alocksave">Save interlocks</button></div>
+    <h3 class="sect">Recent events</h3>
+    <ul id="aevents" class="events"></ul>
+  </section>
+
   <section id="net" hidden>
     <form id="netform" autocomplete="off">
       <label>Mode
@@ -193,5 +221,6 @@
 </main>
 <script src="app.js"></script>
 <script src="dash.js"></script>
+<script src="automation.js"></script>
 </body>
 </html>

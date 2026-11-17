@@ -1,5 +1,18 @@
 # Changelog
 
+## P7a
+- Automation engine, rules half. A rule is a trigger, optional conditions and up to four actions; rules are stored in `/config/automation.json` (temp file then rename, previous copy as `.bak`, removed by factory reset) and run entirely on the board, with no browser open.
+- Triggers: a value changes, conditions become true (fires once each time they go from false to true; the only trigger that accepts "for N seconds"), every N seconds, at a time of day on chosen weekdays, board startup, Wi-Fi connects or drops, and run by hand. The spec's "sequence completes" and timer events arrive with P7b.
+- Conditions: ==, !=, >, <, >=, <= on any numeric device property, and time-of-day windows (a window may cross midnight); up to three, combined with AND or OR (one operator per rule, no nesting).
+- Actions: turn on / off / toggle a relay, set a PWM, motor or servo, stop a motor, send a line to the serial device, send an event (logged). Spec items not built: "set motor direction" (the sign of the speed does it), "change device mode" (no device has one), "update dashboard status".
+- Safeguards: at most 3 conditions and 4 actions, 16 rules (about 340 bytes each, allocated only for rules that exist), per-rule cooldown, a 200 ms minimum between firings, an engine-wide limit of 30 firings a second against rules that trigger each other, interlocks (pairs of relays a rule may not turn on together; they guard rules only, not the dashboard or the API), and a bounded amount of work per pass.
+- A rule "firing" is not a device "done": every on / off / set / stop is checked against the device 1.5 s later and an unconfirmed command is counted and logged. Per rule: fired, failed, unconfirmed, last result.
+- Clock: NTP on both chips once the Wi-Fi client is connected; the time zone is a fixed UTC offset in minutes set on the Automation tab (no automatic daylight saving). Without a clock, schedule triggers never fire and time windows read as closed, and the tab says so.
+- REST: `GET /api/v1/automation`, `/automation/status`, `/automation/schema`; `PUT /automation/settings` (engine switch, offset, interlocks); `POST` / `PUT` / `DELETE /automation/rules` (the id of a rule goes in the body, or `?id=` for delete); `POST /automation/rules/enable|disable|run?id=`. Changes are validated against the live devices, queued, and applied by the main loop.
+- UI: an Automation tab with a rule list in plain English, live per-rule status, an editor, the clock and interlock settings, and the last eight events.
+- Known limits: no authentication until P8; the rule list is not part of the export / import bundle; rules whose device was removed stay and report `no_device` when they run; a stored rule is not re-validated at boot.
+- Native tests 131, mutation check extended with 148 automation mutants; live API test extended.
+
 ## P6
 - Dashboard engine. `GET /api/v1/dashboard` returns the saved layout (automatic mode with no components when nothing is saved); `PUT /api/v1/dashboard` validates a whole layout against the registered devices and stores it in `/config/dashboard.json` (temp file then rename, previous copy kept as `.bak`, removed by factory reset); `GET /api/v1/dashboard/schema` publishes the component types, grid size and limits so the editor offers only bindings the firmware will accept.
 - Device list entries now carry `props`: what a component may bind to (relay `state` read/write, pwm / motor / servo `level` read/write, sensor `temp_c` / `humidity` / `pressure_hpa` / `ok`, input `state` / `count`, serial `text` / `count`).

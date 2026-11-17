@@ -10,6 +10,8 @@
 #include "core/Framework.h"
 #include "core/Version.h"
 #include "hal/Hal.h"
+#include "automation/AutomationEngine.h"
+#include "automation/AutomationStore.h"
 #include "dashboard/DashboardStore.h"
 #include "devices/CommandJson.h"
 #include "devices/DeviceRegistry.h"
@@ -40,12 +42,25 @@ static void sendDevErr(AsyncWebServerRequest* r, DevErr e) {
   sendError(r, statusFor(e), devErrCode(e), devErrField(e));
 }
 
-void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry& devices, WsHub& ws) {
+static int statusFor(AutoErr e) {
+  switch (e) {
+    case AutoErr::NotFound: return 404;
+    case AutoErr::Busy: return 503;
+    case AutoErr::Duplicate:
+    case AutoErr::TooMany: return 409;
+    default: return 400;
+  }
+}
+
+static void sendAutoErr(AsyncWebServerRequest* r, AutoErr e) { sendError(r, statusFor(e), autoErrCode(e), autoErrField(e)); }
+
+void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry& devices, WsHub& ws, AutomationEngine& automation) {
   server_ = new AsyncWebServer(80);
   ws.attach(*server_, fw, devices);  // before the static-file handler, which would otherwise answer /ws
   FrameworkController* f = &fw;
   NetworkManager* n = &net;
   DeviceRegistry* dv = &devices;
+  AutomationEngine* at = &automation;
 
   server_->on("/api/v1/system", HTTP_GET, [f](AsyncWebServerRequest* r) {
     JsonDocument d;
@@ -252,6 +267,134 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry
   dash->setMethod(HTTP_PUT);
   dash->setMaxContentLength(6144);
   server_->addHandler(dash);
+
+  // ---- automation: rules are validated against the devices, queued, and applied by loop(). No auth until P8.
+  server_->on("/api/v1/automation/schema", HTTP_GET, [](AsyncWebServerRequest* r) {
+    JsonDocument d;
+    JsonArray t = d["triggers"].to<JsonArray>();
+    for (uint8_t i = 0; i < uint8_t(TrigType::kCount); i++) t.add(trigName(TrigType(i)));
+    JsonArray o = d["operators"].to<JsonArray>();
+    for (uint8_t i = 0; i < uint8_t(Op::kCount); i++) o.add(opName(Op(i)));
+    JsonArray a = d["actions"].to<JsonArray>();
+    for (uint8_t i = 0; i < uint8_t(ActType::kCount); i++) a.add(actName(ActType(i)));
+    JsonObject l = d["limits"].to<JsonObject>();
+    l["rules"] = kMaxRules;
+    l["conditions"] = kMaxConds;
+    l["actions"] = kMaxActions;
+    l["interlocks"] = kMaxInterlocks;
+    l["text"] = kActTextCap - 1;
+    sendJson(r, d);
+  });
+
+  server_->on("/api/v1/automation", HTTP_GET, [at](AsyncWebServerRequest* r) {
+    AsyncResponseStream* s = r->beginResponseStream("application/json");
+    s->addHeader("Cache-Control", "no-store");
+    {
+      JsonDocument d;
+      AutomationStore::settingsToJson(at->settings(), d.to<JsonObject>());
+      d["schema_version"] = kConfigSchema;
+      String head;
+      serializeJson(d, head);
+      head.remove(head.length() - 1);  // without the closing brace: the rules follow
+      s->print(head);
+      s->print(",\"rules\":[");
+    }
+    Rule* rule = new (std::nothrow) Rule;  // one rule at a time, off the small stack
+    for (size_t i = 0; rule && at->ruleAt(i, *rule); i++) {
+      JsonDocument d;
+      AutomationStore::ruleToJson(*rule, d.to<JsonObject>());
+      if (i) s->print(',');
+      serializeJson(d, *s);
+    }
+    delete rule;
+    s->print("]}");
+    r->send(s);
+  });
+
+  server_->on("/api/v1/automation/status", HTTP_GET, [at](AsyncWebServerRequest* r) {
+    AsyncResponseStream* s = r->beginResponseStream("application/json");
+    s->addHeader("Cache-Control", "no-store");
+    {
+      JsonDocument d;
+      at->describeStatusHead(d.to<JsonObject>());
+      String head;
+      serializeJson(d, head);
+      head.remove(head.length() - 1);
+      s->print(head);
+      s->print(",\"status\":[");
+    }
+    for (size_t i = 0;; i++) {
+      JsonDocument d;
+      if (!at->describeRule(i, d.to<JsonObject>())) break;
+      if (i) s->print(',');
+      serializeJson(d, *s);
+    }
+    s->print("],\"events\":[");
+    for (size_t i = 0;; i++) {
+      JsonDocument d;
+      if (!at->describeEvent(i, d.to<JsonObject>())) break;
+      if (i) s->print(',');
+      serializeJson(d, *s);
+    }
+    s->print("]}");
+    r->send(s);
+  });
+
+  auto* settings = new AsyncCallbackJsonWebHandler("/api/v1/automation/settings", [at](AsyncWebServerRequest* r, JsonVariant& json) {
+    AutoSettings st = at->settings();  // merge: only the fields sent change
+    AutoErr e = AutomationStore::parseSettings(json, st);
+    if (e == AutoErr::Ok) e = at->requestSettings(st);
+    if (e != AutoErr::Ok) { sendAutoErr(r, e); return; }
+    JsonDocument d;
+    d["ok"] = true;
+    sendJson(r, d, 202);
+  });
+  settings->setMethod(HTTP_PUT);
+  settings->setMaxContentLength(512);
+  server_->addHandler(settings);
+
+  // Create (POST) and replace (PUT) take a whole rule; replace needs the id of an existing one.
+  for (int replace = 0; replace < 2; replace++) {
+    auto* h = new AsyncCallbackJsonWebHandler("/api/v1/automation/rules", [at, replace](AsyncWebServerRequest* r, JsonVariant& json) {
+      Rule* rule = new (std::nothrow) Rule;
+      if (!rule) { sendError(r, 503, "out_of_memory"); return; }
+      AutoErr e = AutomationStore::parseRule(json, *rule);
+      if (e == AutoErr::Ok) e = replace ? at->requestReplace(*rule) : at->requestAdd(*rule);
+      delete rule;
+      if (e != AutoErr::Ok) { sendAutoErr(r, e); return; }
+      JsonDocument d;
+      d["ok"] = true;
+      sendJson(r, d, 202);
+    });
+    h->setMethod(replace ? HTTP_PUT : HTTP_POST);
+    h->setMaxContentLength(1536);
+    server_->addHandler(h);
+  }
+
+  server_->on("/api/v1/automation/rules", HTTP_DELETE, [at](AsyncWebServerRequest* r) {
+    if (!r->hasParam("id")) { sendError(r, 400, "bad_id", "id"); return; }
+    AutoErr e = at->requestRemove(r->getParam("id")->value().c_str());
+    if (e != AutoErr::Ok) { sendAutoErr(r, e); return; }
+    JsonDocument d;
+    d["ok"] = true;
+    sendJson(r, d, 202);
+  });
+
+  // enable / disable / run: POST with ?id=
+  struct Act { const char* path; int kind; };
+  static const Act acts[] = {{"/api/v1/automation/rules/enable", 1}, {"/api/v1/automation/rules/disable", 0}, {"/api/v1/automation/rules/run", 2}};
+  for (const Act& a : acts) {
+    int kind = a.kind;
+    server_->on(a.path, HTTP_POST, [at, kind](AsyncWebServerRequest* r) {
+      if (!r->hasParam("id")) { sendError(r, 400, "bad_id", "id"); return; }
+      const char* id = r->getParam("id")->value().c_str();
+      AutoErr e = kind == 2 ? at->requestRun(id) : at->requestEnable(id, kind == 1);
+      if (e != AutoErr::Ok) { sendAutoErr(r, e); return; }
+      JsonDocument d;
+      d["ok"] = true;
+      sendJson(r, d, 202);
+    });
+  }
 
   server_->on("/api/v1/i2c", HTTP_GET, [dv](AsyncWebServerRequest* r) {
     JsonDocument d;

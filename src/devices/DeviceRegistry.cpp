@@ -94,6 +94,26 @@ bool DeviceRegistry::config(const char* id, DeviceConfig& out) const {
   return true;
 }
 
+bool DeviceRegistry::readProp(const char* id, Prop p, double& out) const {
+  hal::CriticalSection cs;
+  int i = find(id);
+  if (i < 0) return false;
+  const DeviceConfig& c = cfg_[i];
+  const Runtime& r = rt_[i];
+  bool w;
+  if (!devicePropAccess(c, p, w)) return false;
+  switch (p) {
+    case Prop::State: out = r.on ? 1 : 0; return true;
+    case Prop::Level: out = c.type == DeviceType::Pwm ? r.duty : r.val; return true;
+    case Prop::Count: out = c.type == DeviceType::Serial ? serialLines_ : r.edges; return true;
+    case Prop::Ok: out = r.ok ? 1 : 0; return true;
+    case Prop::Temp: out = r.temp; return r.ok;
+    case Prop::Humidity: out = r.hum; return r.ok && r.hasHum;
+    case Prop::Pressure: out = r.press; return r.ok;
+    default: return false;
+  }
+}
+
 DevErr DeviceRegistry::requestUpdate(const DeviceConfig& c) {
   {
     hal::CriticalSection cs;

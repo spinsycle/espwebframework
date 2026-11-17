@@ -43,5 +43,10 @@ void uartEnd();
 int uartRead();                        // next byte, or -1 if none waiting
 void uartWrite(const char* s, size_t n);
 
+// Wall clock. clockBegin() starts NTP (it only gets an answer once the Wi-Fi client is connected);
+// epochUtc() is UTC seconds, which is below ~1.6e9 until the first answer arrives.
+void clockBegin();
+uint32_t epochUtc();
+
 }  // namespace hal
 }  // namespace espwf

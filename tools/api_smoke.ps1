@@ -289,5 +289,130 @@ Call DELETE '/devices?id=smoke_dr' | Out-Null
 Call DELETE '/devices?id=smoke_dp' | Out-Null
 WaitGone
 
+
+Write-Host '== P7 automation (rules are created, run and removed; relays are only configured, nothing needs wiring)'
+$sch = Call GET '/automation/schema'
+Check 'schema lists 7 trigger types' ($sch.json.triggers.Count -eq 7)
+Check 'schema limits: 16 rules, 3 conditions, 4 actions' ($sch.json.limits.rules -eq 16 -and $sch.json.limits.conditions -eq 3 -and $sch.json.limits.actions -eq 4)
+$cfg0 = Call GET '/automation'
+Check 'automation config readable' ($cfg0.code -eq 200 -and $cfg0.json.schema_version -eq 1)
+$st = Call GET '/automation/status'
+Check 'status has clock, rules and events' ($st.code -eq 200 -and $null -ne $st.json.clock -and $null -ne $st.json.events)
+
+Call POST '/devices' @{ id = 'smoke_ar'; type = 'relay'; pin = $relayPin } | Out-Null
+Call POST '/devices' @{ id = 'smoke_ar2'; type = 'relay'; pin = $inPin } | Out-Null
+Call POST '/devices' @{ id = 'smoke_ap'; type = 'pwm'; pin = $pwmPin } | Out-Null
+Settle
+
+function Rule($id, $trigger, $actions, $conds = @()) {
+  @{ id = $id; name = $id; enabled = $true; trigger = $trigger; match = 'all'; conditions = $conds; actions = $actions; cooldown_s = 0 }
+}
+function RuleStatus($id) { (Call GET '/automation/status').json.status | Where-Object { $_.id -eq $id } }
+function Events() { (Call GET '/automation/status').json.events }
+$evt = @(@{ type = 'event'; text = 'smoke_ping' })
+
+$r = Call POST '/automation/rules' (Rule 'smoke_a' @{ type = 'manual' } $evt)
+Check 'valid rule accepted' ($r.code -eq 202)
+Start-Sleep -Milliseconds 1200
+$one = (Call GET '/automation').json.rules | Where-Object { $_.id -eq 'smoke_a' }
+Check 'rule is stored and listed' ($one -and $one.trigger.type -eq 'manual' -and $one.actions[0].text -eq 'smoke_ping')
+Check 'duplicate rule id refused (409)' ((Call POST '/automation/rules' (Rule 'smoke_a' @{ type = 'manual' } $evt)).code -eq 409)
+
+$bad = @(
+  @('change on an unknown device', (Rule 'smoke_b' @{ type = 'change'; device = 'smoke_nope'; property = 'state' } $evt), 'unknown_device'),
+  @('change on a property the device lacks', (Rule 'smoke_b' @{ type = 'change'; device = 'smoke_ar'; property = 'level' } $evt), 'bad_property'),
+  @('when rule without conditions', (Rule 'smoke_b' @{ type = 'when' } $evt), 'bad_conditions'),
+  @('interval of 0', (Rule 'smoke_b' @{ type = 'interval'; every_s = 0 } $evt), 'bad_time'),
+  @('schedule with a bad time', (Rule 'smoke_b' @{ type = 'schedule'; time = '25:00' } $evt), 'bad_time'),
+  @('schedule with no days', (Rule 'smoke_b' @{ type = 'schedule'; time = '10:00'; days = @() } $evt), 'bad_days'),
+  @('no actions', (Rule 'smoke_b' @{ type = 'manual' } @()), 'bad_actions'),
+  @('pwm set to 101', (Rule 'smoke_b' @{ type = 'manual' } @(@{ type = 'set'; device = 'smoke_ap'; value = 101 })), 'bad_action'),
+  @('on for a pwm', (Rule 'smoke_b' @{ type = 'manual' } @(@{ type = 'on'; device = 'smoke_ap' })), 'bad_action'),
+  @('action on an unknown device', (Rule 'smoke_b' @{ type = 'manual' } @(@{ type = 'on'; device = 'smoke_nope' })), 'unknown_device'),
+  @('event without a name', (Rule 'smoke_b' @{ type = 'manual' } @(@{ type = 'event'; text = '' })), 'bad_value'),
+  @('duration on a non-when rule', (Rule 'smoke_b' @{ type = 'interval'; every_s = 5 } $evt @(@{ device = 'smoke_ar'; property = 'state'; operator = '=='; value = 1; for_s = 5 })), 'bad_duration'),
+  @('unknown operator', (Rule 'smoke_b' @{ type = 'manual' } $evt @(@{ device = 'smoke_ar'; property = 'state'; operator = '=>'; value = 1 })), 'bad_operator'),
+  @('four conditions', (Rule 'smoke_b' @{ type = 'manual' } $evt @(1..4 | ForEach-Object { @{ device = 'smoke_ar'; property = 'state'; operator = '=='; value = 1 } })), 'bad_conditions'),
+  @('five actions', (Rule 'smoke_b' @{ type = 'manual' } @(1..5 | ForEach-Object { @{ type = 'event'; text = "e$_" } })), 'bad_actions'),
+  @('bad rule id', (Rule 'Bad Id' @{ type = 'manual' } $evt), 'bad_id'),
+  @('cooldown too long', @{ id = 'smoke_b'; name = 'x'; trigger = @{ type = 'manual' }; actions = $evt; cooldown_s = 86401 }, 'bad_cooldown')
+)
+foreach ($b in $bad) {
+  $r = Call POST '/automation/rules' $b[1]
+  Check ("refused: " + $b[0]) ((($r.code -eq 400) -or ($r.code -eq 409)) -and ($r.json.error -eq $b[2]))
+}
+Start-Sleep -Milliseconds 800
+Check 'refused rules were not stored' (-not ((Call GET '/automation').json.rules | Where-Object { $_.id -eq 'smoke_b' }))
+
+$r = Call PUT '/automation/rules' (Rule 'smoke_a' @{ type = 'interval'; every_s = 3600 } $evt)
+Check 'replace accepted' ($r.code -eq 202)
+Start-Sleep -Milliseconds 1200
+Check 'replace applied' (((Call GET '/automation').json.rules | Where-Object { $_.id -eq 'smoke_a' }).trigger.every_s -eq 3600)
+Check 'replace of an unknown rule is 404' ((Call PUT '/automation/rules' (Rule 'smoke_nope' @{ type = 'manual' } $evt)).code -eq 404)
+
+# run it by hand: a manual rule that turns the relay on
+$null = Call PUT '/automation/rules' (Rule 'smoke_a' @{ type = 'manual' } @(@{ type = 'on'; device = 'smoke_ar' }))
+Start-Sleep -Milliseconds 1200
+$r = Call POST '/automation/rules/run?id=smoke_a'
+Check 'run accepted' ($r.code -eq 202)
+Start-Sleep -Milliseconds 1500
+Check 'the rule turned the relay on' ((Dev 'smoke_ar').state.on -eq $true)
+$s = RuleStatus 'smoke_a'
+Check 'status counts the firing' ($s.fired -ge 1 -and $s.last -eq 'ok')
+Check 'the command was confirmed by the device' ($s.unconfirmed -eq 0)
+Check 'the event log shows it' ([bool](Events | Where-Object { $_.rule -eq 'smoke_a' -and $_.kind -eq 'fired' }))
+Check 'run of an unknown rule is 404' ((Call POST '/automation/rules/run?id=smoke_nope').code -eq 404)
+
+# a when rule watching the relay: it fires once when the relay goes on
+$null = Call POST '/automation/rules' (Rule 'smoke_w' @{ type = 'when' } $evt @(@{ device = 'smoke_ar'; property = 'state'; operator = '=='; value = 1 }))
+Start-Sleep -Milliseconds 1500
+Check 'a when rule fires when its condition is already true' ((RuleStatus 'smoke_w').fired -eq 1)
+Start-Sleep -Milliseconds 1200
+Check 'it does not fire again while the condition stays true' ((RuleStatus 'smoke_w').fired -eq 1)
+Call POST '/command' @{ id = 'smoke_ar'; action = 'set'; value = $false } | Out-Null
+Start-Sleep -Milliseconds 1000
+Call POST '/command' @{ id = 'smoke_ar'; action = 'set'; value = $true } | Out-Null
+Start-Sleep -Milliseconds 1200
+Check 'it fires again after the condition went false and true' ((RuleStatus 'smoke_w').fired -eq 2)
+
+# interlock: smoke_ar is on, so a rule may not turn smoke_ar2 on
+$r = Call PUT '/automation/settings' @{ interlocks = @(, @('smoke_ar', 'smoke_ar2')) }
+Check 'interlock accepted' ($r.code -eq 202)
+Start-Sleep -Milliseconds 1200
+$null = Call POST '/automation/rules' (Rule 'smoke_i' @{ type = 'manual' } @(@{ type = 'on'; device = 'smoke_ar2' }))
+Start-Sleep -Milliseconds 1200
+$null = Call POST '/automation/rules/run?id=smoke_i'
+Start-Sleep -Milliseconds 1200
+Check 'the interlock blocked the rule' ((RuleStatus 'smoke_i').last -eq 'blocked' -and (Dev 'smoke_ar2').state.on -eq $false)
+Check 'an interlock must name two different relays' ((Call PUT '/automation/settings' @{ interlocks = @(, @('smoke_ar', 'smoke_ar')) }).json.error -eq 'bad_interlock')
+Check 'an interlock must name relays' ((Call PUT '/automation/settings' @{ interlocks = @(, @('smoke_ar', 'smoke_ap')) }).json.error -eq 'bad_interlock')
+Check 'utc offset out of range refused' ((Call PUT '/automation/settings' @{ utc_offset_min = 900 }).json.error -eq 'bad_offset')
+$null = Call PUT '/automation/settings' @{ interlocks = @() }
+Start-Sleep -Milliseconds 1000
+
+# disable / enable and the engine switch
+Check 'disable accepted' ((Call POST '/automation/rules/disable?id=smoke_w').code -eq 202)
+Start-Sleep -Milliseconds 1200
+Check 'the rule list shows it disabled' (((Call GET '/automation').json.rules | Where-Object { $_.id -eq 'smoke_w' }).enabled -eq $false)
+Check 'enable accepted' ((Call POST '/automation/rules/enable?id=smoke_w').code -eq 202)
+Start-Sleep -Milliseconds 1200
+Check 'enable of an unknown rule is 404' ((Call POST '/automation/rules/enable?id=smoke_nope').code -eq 404)
+$null = Call PUT '/automation/settings' @{ enabled = $false }
+Start-Sleep -Milliseconds 1200
+Check 'the engine can be switched off' ((Call GET '/automation/status').json.enabled -eq $false)
+$null = Call PUT '/automation/settings' @{ enabled = $true }
+Start-Sleep -Milliseconds 1200
+Check 'and back on' ((Call GET '/automation/status').json.enabled -eq $true)
+
+# clean up
+foreach ($id in 'smoke_a', 'smoke_w', 'smoke_i') {
+  Call DELETE "/automation/rules?id=$id" | Out-Null
+  Start-Sleep -Milliseconds 1000
+}
+Check 'rules deleted' (-not ((Call GET '/automation').json.rules | Where-Object { $_.id -like 'smoke_*' }))
+Check 'delete of an unknown rule is 404' ((Call DELETE '/automation/rules?id=smoke_nope').code -eq 404)
+foreach ($id in 'smoke_ar', 'smoke_ar2', 'smoke_ap') { Call DELETE "/devices?id=$id" | Out-Null }
+WaitGone
+
 Write-Host ("`n{0} passed, {1} failed" -f $script:pass, $script:fail)
 exit ([int]($script:fail -gt 0))

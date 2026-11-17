@@ -6,6 +6,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
+#include "automation/AutomationEngine.h"
 #include "devices/DeviceRegistry.h"
 #include "net/HttpApi.h"
 #include "net/NetworkManager.h"
@@ -30,6 +31,7 @@ class FrameworkController {
  private:
   char deviceName_[33] = "ESP Device";
   espwf::DeviceRegistry devices_;
+  espwf::AutomationEngine automation_;
   espwf::NetworkManager net_;
   espwf::HttpApi http_;
   espwf::WsHub ws_;

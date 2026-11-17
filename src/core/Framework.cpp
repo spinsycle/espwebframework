@@ -31,7 +31,8 @@ bool FrameworkController::begin() {
     Serial.println("[espwf] no valid network config, using defaults");
   }
   net_.begin(cfg);
-  http_.begin(*this, net_, devices_, ws_);
+  automation_.begin(devices_, net_);
+  http_.begin(*this, net_, devices_, ws_, automation_);
   Serial.printf("[espwf] ready, AP '%s'\n", cfg.apSsid);
   return true;
 }
@@ -42,11 +43,13 @@ void FrameworkController::loop() {
   if (resetPending_) {
     resetPending_ = false;
     devices_.halt();  // nothing may write a config file after this point
+    automation_.halt();
     for (const char* f : espwf::kConfigFiles) LittleFS.remove(f);
     Serial.println("[espwf] factory reset: saved config deleted, restarting");
     restart();
   }
   devices_.loop();
+  automation_.loop();
   if (devices_.restartRequested() && !restartPending_) restart();
   ws_.loop();
   net_.loop();
