@@ -247,8 +247,8 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry
     r->send(resp);
   });
 
-  auto* dash = new AsyncCallbackJsonWebHandler("/api/v1/dashboard", [dv](AsyncWebServerRequest* r, JsonVariant& json) {
-    DashboardStore::Result res = DashboardStore::validate(json, *dv);
+  auto* dash = new AsyncCallbackJsonWebHandler("/api/v1/dashboard", [dv, at](AsyncWebServerRequest* r, JsonVariant& json) {
+    DashboardStore::Result res = DashboardStore::validate(json, *dv, at);
     if (res.err != DashErr::Ok) {
       JsonDocument d;
       d["error"] = "invalid_dashboard";
@@ -283,10 +283,102 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry
     l["actions"] = kMaxActions;
     l["interlocks"] = kMaxInterlocks;
     l["text"] = kActTextCap - 1;
+    l["sequences"] = kMaxSeqs;
+    l["steps"] = kMaxSteps;
+    l["steps_total"] = kMaxStepsTotal;
+    l["timers"] = kMaxTimers;
+    JsonArray st = d["step_types"].to<JsonArray>();
+    for (uint8_t i = 0; i < uint8_t(StepType::kCount); i++) st.add(stepName(StepType(i)));
     sendJson(r, d);
   });
 
   // The status route is registered before the config route: this server matches a route as a prefix of longer paths.
+  // ---- sequences and timers. Longer paths first: this server matches a route as a prefix of longer ones.
+  server_->on("/api/v1/automation/timers", HTTP_GET, [at](AsyncWebServerRequest* r) {  // light: the dashboard polls it
+    AsyncResponseStream* s = r->beginResponseStream("application/json");
+    s->addHeader("Cache-Control", "no-store");
+    s->print("{\"timers\":[");
+    for (size_t i = 0;; i++) {
+      JsonDocument d;
+      if (!at->describeTimer(i, d.to<JsonObject>())) break;
+      if (i) s->print(',');
+      serializeJson(d, *s);
+    }
+    s->print("]}");
+    r->send(s);
+  });
+
+  struct CtlRoute { const char* path; bool seq; AutomationCore::Ctl op; };
+  static const CtlRoute ctlRoutes[] = {
+      {"/api/v1/automation/sequences/start", true, AutomationCore::Ctl::SeqStart},
+      {"/api/v1/automation/sequences/stop", true, AutomationCore::Ctl::SeqStop},
+      {"/api/v1/automation/sequences/pause", true, AutomationCore::Ctl::SeqPause},
+      {"/api/v1/automation/sequences/resume", true, AutomationCore::Ctl::SeqResume},
+      {"/api/v1/automation/timers/start", false, AutomationCore::Ctl::TimerStart},
+      {"/api/v1/automation/timers/stop", false, AutomationCore::Ctl::TimerStop},
+  };
+  for (const CtlRoute& c : ctlRoutes) {
+    bool seq = c.seq;
+    AutomationCore::Ctl op = c.op;
+    server_->on(c.path, HTTP_POST, [at, seq, op](AsyncWebServerRequest* r) {
+      if (!r->hasParam("id")) { sendError(r, 400, "bad_id", "id"); return; }
+      const char* id = r->getParam("id")->value().c_str();
+      AutoErr e = seq ? at->requestSeqCtl(op, id) : at->requestTimerCtl(op, id);
+      if (e != AutoErr::Ok) { sendAutoErr(r, e); return; }
+      JsonDocument d;
+      d["ok"] = true;
+      sendJson(r, d, 202);
+    });
+  }
+
+  server_->on("/api/v1/automation/sequences", HTTP_DELETE, [at](AsyncWebServerRequest* r) {
+    if (!r->hasParam("id")) { sendError(r, 400, "bad_id", "id"); return; }
+    AutoErr e = at->requestSeqRemove(r->getParam("id")->value().c_str());
+    if (e != AutoErr::Ok) { sendAutoErr(r, e); return; }
+    JsonDocument d;
+    d["ok"] = true;
+    sendJson(r, d, 202);
+  });
+  server_->on("/api/v1/automation/timers", HTTP_DELETE, [at](AsyncWebServerRequest* r) {
+    if (!r->hasParam("id")) { sendError(r, 400, "bad_id", "id"); return; }
+    AutoErr e = at->requestTimerRemove(r->getParam("id")->value().c_str());
+    if (e != AutoErr::Ok) { sendAutoErr(r, e); return; }
+    JsonDocument d;
+    d["ok"] = true;
+    sendJson(r, d, 202);
+  });
+
+  // Create (POST) and replace (PUT) take the whole sequence or timer.
+  for (int replace = 0; replace < 2; replace++) {
+    auto* sh = new AsyncCallbackJsonWebHandler("/api/v1/automation/sequences", [at, replace](AsyncWebServerRequest* r, JsonVariant& json) {
+      SeqDef* q = new (std::nothrow) SeqDef;  // about 1.5 KB: off the small stack
+      if (!q) { sendError(r, 503, "out_of_memory"); return; }
+      AutoErr e = AutomationStore::parseSeq(json, *q);
+      if (e == AutoErr::Ok) e = replace ? at->requestSeqReplace(*q) : at->requestSeqAdd(*q);
+      delete q;
+      if (e != AutoErr::Ok) { sendAutoErr(r, e); return; }
+      JsonDocument d;
+      d["ok"] = true;
+      sendJson(r, d, 202);
+    });
+    sh->setMethod(replace ? HTTP_PUT : HTTP_POST);
+    sh->setMaxContentLength(3072);
+    server_->addHandler(sh);
+
+    auto* th = new AsyncCallbackJsonWebHandler("/api/v1/automation/timers", [at, replace](AsyncWebServerRequest* r, JsonVariant& json) {
+      TimerDef t;
+      AutoErr e = AutomationStore::parseTimer(json, t);
+      if (e == AutoErr::Ok) e = replace ? at->requestTimerReplace(t) : at->requestTimerAdd(t);
+      if (e != AutoErr::Ok) { sendAutoErr(r, e); return; }
+      JsonDocument d;
+      d["ok"] = true;
+      sendJson(r, d, 202);
+    });
+    th->setMethod(replace ? HTTP_PUT : HTTP_POST);
+    th->setMaxContentLength(256);
+    server_->addHandler(th);
+  }
+
   server_->on("/api/v1/automation/status", HTTP_GET, [at](AsyncWebServerRequest* r) {
     AsyncResponseStream* s = r->beginResponseStream("application/json");
     s->addHeader("Cache-Control", "no-store");
@@ -309,6 +401,20 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry
     for (size_t i = 0;; i++) {
       JsonDocument d;
       if (!at->describeEvent(i, d.to<JsonObject>())) break;
+      if (i) s->print(',');
+      serializeJson(d, *s);
+    }
+    s->print("],\"sequences\":[");
+    for (size_t i = 0;; i++) {
+      JsonDocument d;
+      if (!at->describeSeq(i, d.to<JsonObject>())) break;
+      if (i) s->print(',');
+      serializeJson(d, *s);
+    }
+    s->print("],\"timers\":[");
+    for (size_t i = 0;; i++) {
+      JsonDocument d;
+      if (!at->describeTimer(i, d.to<JsonObject>())) break;
       if (i) s->print(',');
       serializeJson(d, *s);
     }
@@ -337,6 +443,22 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry
       serializeJson(d, *s);
     }
     delete rule;
+    s->print("],\"timers\":[");  // the stored definitions, plus the live state a timer card needs
+    for (size_t i = 0;; i++) {
+      JsonDocument d;
+      if (!at->describeTimer(i, d.to<JsonObject>())) break;
+      if (i) s->print(',');
+      serializeJson(d, *s);
+    }
+    s->print("],\"sequences\":[");
+    SeqDef* q = new (std::nothrow) SeqDef;
+    for (size_t i = 0; q && at->seqAt(i, *q); i++) {
+      JsonDocument d;
+      AutomationStore::seqToJson(*q, d.to<JsonObject>());
+      if (i) s->print(',');
+      serializeJson(d, *s);
+    }
+    delete q;
     s->print("]}");
     r->send(s);
   });

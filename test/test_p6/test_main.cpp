@@ -77,9 +77,11 @@ void test_comp_names_round_trip() {
     EQ(i, t);
   }
   CompType t;
-  TEST_ASSERT_FALSE(parseCompType("timer", t));  // deferred to P7
+  TEST_ASSERT_TRUE(parseCompType("timer", t));
+  EQ(CompType::Timer, t);
+  TEST_ASSERT_FALSE(parseCompType("clock", t));
   TEST_ASSERT_FALSE(parseCompType("", t));
-  EQ(13, CompType::kCount);
+  EQ(14, CompType::kCount);
 }
 
 void test_levels() {
@@ -127,6 +129,7 @@ void test_comp_needs() {
   EQ(Need::ReadText, compNeed(CompType::Text));
   EQ(Need::Card, compNeed(CompType::DeviceCard));
   EQ(Need::Devices, compNeed(CompType::Group));
+  EQ(Need::Timer, compNeed(CompType::Timer));
 }
 
 // ---- validateComponent: bindings
@@ -158,6 +161,41 @@ void test_slider_and_readouts() {
   EQ(DashErr::Prop, check(comp("a", CompType::Status, "p1", Prop::Level)));
   EQ(DashErr::Ok, check(comp("a", CompType::Text, "ser", Prop::Text)));
   EQ(DashErr::Prop, check(comp("a", CompType::Text, "r1", Prop::State)));
+}
+
+static bool timerFind(void*, const char* id) { return !strcmp(id, "tm"); }
+
+static bool anyTimer(void*, const char*) { return true; }
+
+void test_timer_component_id_must_be_terminated() {
+  DashComp t = comp("a", CompType::Timer, "tm", Prop::None);
+  t.w = 2;
+  memset(t.device, 'x', kIdCap);                                                // no terminator
+  EQ(DashErr::Device, validateComponent(t, find, nullptr, 0, anyTimer, nullptr));
+  strcpy(t.device, "tm");
+  EQ(DashErr::Ok, validateComponent(t, find, nullptr, 0, anyTimer, nullptr));
+}
+
+void test_timer_component() {
+  DashComp t = comp("a", CompType::Timer, "tm", Prop::None);
+  t.w = 2;
+  EQ(DashErr::Ok, validateComponent(t, find, nullptr, 0, timerFind, nullptr));
+  EQ(DashErr::Device, validateComponent(t, find, nullptr, 0));                   // no timer table: refused
+  strcpy(t.device, "gone");
+  EQ(DashErr::Device, validateComponent(t, find, nullptr, 0, timerFind, nullptr));
+  t.device[0] = 0;
+  EQ(DashErr::Device, validateComponent(t, find, nullptr, 0, timerFind, nullptr));
+  strcpy(t.device, "r1");                                                         // a device id is not a timer id
+  EQ(DashErr::Device, validateComponent(t, find, nullptr, 0, timerFind, nullptr));
+  strcpy(t.device, "tm");
+  t.w = 1;
+  EQ(DashErr::Layout, validateComponent(t, find, nullptr, 0, timerFind, nullptr));  // wide enough for a time and a button
+  TEST_ASSERT_FALSE(needAccepts(Need::Timer, Prop::State, true));
+  TEST_ASSERT_FALSE(needAccepts(Need::Timer, Prop::Level, false));
+  TEST_ASSERT_EQUAL_STRING("timer", compTypeName(CompType::Timer));
+  uint8_t w, h;
+  compMinSize(CompType::Timer, w, h);
+  EQ(2, w); EQ(1, h);
 }
 
 void test_device_card() {
@@ -427,6 +465,8 @@ int main(int, char**) {
   RUN_TEST(test_toggle);
   RUN_TEST(test_slider_and_readouts);
   RUN_TEST(test_device_card);
+  RUN_TEST(test_timer_component);
+  RUN_TEST(test_timer_component_id_must_be_terminated);
   RUN_TEST(test_push_button);
   RUN_TEST(test_joystick);
   RUN_TEST(test_dropdown);

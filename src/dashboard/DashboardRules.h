@@ -91,12 +91,12 @@ inline bool levelRange(DeviceType t, int& lo, int& hi) {
 // ---- component types -----------------------------------------------------------------------------
 
 enum class CompType : uint8_t {
-  Toggle, PushButton, Slider, Joystick, Gauge, Numeric, Status, Graph, Text, Dropdown, Progress, DeviceCard, Group, kCount
+  Toggle, PushButton, Slider, Joystick, Gauge, Numeric, Status, Graph, Text, Dropdown, Progress, DeviceCard, Group, Timer, kCount
 };
 
 inline const char* compTypeName(CompType t) {
   static const char* const n[] = {"toggle", "push_button", "slider", "joystick", "gauge", "numeric", "status",
-                                  "graph", "text", "dropdown", "progress", "device_card", "group_panel"};
+                                  "graph", "text", "dropdown", "progress", "device_card", "group_panel", "timer"};
   return uint8_t(t) < uint8_t(CompType::kCount) ? n[uint8_t(t)] : "";
 }
 inline bool parseCompType(const char* s, CompType& out) {
@@ -115,7 +115,8 @@ enum class Need : uint8_t {
   WriteLevel,  // a commandable number (slider, dropdown, joystick: two of them)
   ReadNumber,  // a readable number (gauge, numeric, progress, graph)
   ReadState,   // a readable on/off or ok flag (status)
-  ReadText     // a readable string (text)
+  ReadText,    // a readable string (text)
+  Timer        // an automation timer, named in binding.device (timer)
 };
 
 inline Need compNeed(CompType t) {
@@ -133,6 +134,7 @@ inline Need compNeed(CompType t) {
     case CompType::Text: return Need::ReadText;
     case CompType::DeviceCard: return Need::Card;
     case CompType::Group: return Need::Devices;
+    case CompType::Timer: return Need::Timer;
     default: return Need::Card;
   }
 }
@@ -154,7 +156,7 @@ inline bool needAccepts(Need n, Prop p, bool write) {
 inline void compMinSize(CompType t, uint8_t& w, uint8_t& h) {
   w = 1; h = 1;
   if (t == CompType::Joystick || t == CompType::Group) { w = 2; h = 2; }
-  if (t == CompType::Graph) w = 2;
+  if (t == CompType::Graph || t == CompType::Timer) w = 2;
 }
 
 // ---- one component, validated --------------------------------------------------------------------
@@ -234,7 +236,9 @@ inline bool text(const char* s, unsigned cap, bool allowEmpty) {
 
 // Everything except the overlap and duplicate checks (those need the whole list: see DashSet).
 // `nTabs` is how many tabs the dashboard has; with none, tab 0 is the single implicit page.
-inline DashErr validateComponent(const DashComp& c, DeviceLookup find, void* ctx, size_t nTabs) {
+// `timerFind` says whether an automation timer exists; without it a timer component is refused.
+inline DashErr validateComponent(const DashComp& c, DeviceLookup find, void* ctx, size_t nTabs,
+                                 bool (*timerFind)(void*, const char*) = nullptr, void* tctx = nullptr) {
   using namespace dashdetail;
   if (!text(c.id, kIdCap, false) || !detail::validDeviceId(c.id)) return DashErr::Id;
   if (uint8_t(c.type) >= uint8_t(CompType::kCount)) return DashErr::Type;
@@ -257,6 +261,7 @@ inline DashErr validateComponent(const DashComp& c, DeviceLookup find, void* ctx
     }
     return DashErr::Ok;
   }
+  if (need == Need::Timer) return (text(c.device, kIdCap, false) && timerFind && timerFind(tctx, c.device)) ? DashErr::Ok : DashErr::Device;
   if (!text(c.device, kIdCap, false) || !find(ctx, c.device, d)) return DashErr::Device;
   if (need == Need::Card) return DashErr::Ok;
 

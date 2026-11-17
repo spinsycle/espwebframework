@@ -229,7 +229,7 @@ WaitGone
 
 Write-Host '== P6 dashboard (validation only: layouts are stored, nothing moves)'
 $sc = Call GET '/dashboard/schema'
-Check 'schema has 13 component types' ($sc.json.types.Count -eq 13)
+Check 'schema has 14 component types' ($sc.json.types.Count -eq 14)
 Check 'schema grid is 4 columns' ($sc.json.grid.columns -eq 4)
 Check 'schema slider needs a writable level' (($sc.json.types | Where-Object { $_.name -eq 'slider' }).need -eq 'write_level')
 $orig = Call GET '/dashboard'
@@ -292,7 +292,7 @@ WaitGone
 
 Write-Host '== P7 automation (rules are created, run and removed; relays are only configured, nothing needs wiring)'
 $sch = Call GET '/automation/schema'
-Check 'schema lists 7 trigger types' ($sch.json.triggers.Count -eq 7)
+Check 'schema lists 9 trigger types' ($sch.json.triggers.Count -eq 9)
 Check 'schema limits: 16 rules, 3 conditions, 4 actions' ($sch.json.limits.rules -eq 16 -and $sch.json.limits.conditions -eq 3 -and $sch.json.limits.actions -eq 4)
 $cfg0 = Call GET '/automation'
 Check 'automation config readable' ($cfg0.code -eq 200 -and $cfg0.json.schema_version -eq 1)
@@ -412,6 +412,166 @@ foreach ($id in 'smoke_a', 'smoke_w', 'smoke_i') {
 Check 'rules deleted' (-not ((Call GET '/automation').json.rules | Where-Object { $_.id -like 'smoke_*' }))
 Check 'delete of an unknown rule is 404' ((Call DELETE '/automation/rules?id=smoke_nope').code -eq 404)
 foreach ($id in 'smoke_ar', 'smoke_ar2', 'smoke_ap') { Call DELETE "/devices?id=$id" | Out-Null }
+WaitGone
+
+
+Write-Host '== P7b sequences and timers (real time: a few seconds each; relays are only configured)'
+$sch = Call GET '/automation/schema'
+Check 'schema lists the three step types' ($sch.json.step_types.Count -eq 3)
+Check 'schema limits: 4 sequences, 16 steps, 32 in all, 6 timers' ($sch.json.limits.sequences -eq 4 -and $sch.json.limits.steps -eq 16 -and $sch.json.limits.steps_total -eq 32 -and $sch.json.limits.timers -eq 6)
+Check 'timer is a dashboard component' (($sc.json.types | Where-Object { $_.name -eq 'timer' }).need -eq 'timer')
+
+Call POST '/devices' @{ id = 'smoke_sr'; type = 'relay'; pin = $relayPin } | Out-Null
+Call POST '/devices' @{ id = 'smoke_sp'; type = 'pwm'; pin = $pwmPin } | Out-Null
+Settle
+
+function Timer($id, $secs, $repeat = $false) { @{ id = $id; name = $id; duration_s = $secs; repeat = $repeat } }
+function TimerStatus($id) { (Call GET '/automation/timers').json.timers | Where-Object { $_.id -eq $id } }
+function Seq($id, $steps, $repeat = 1) { @{ id = $id; name = $id; repeat = $repeat; steps = $steps } }
+function SeqStatus($id) { (Call GET '/automation/status').json.sequences | Where-Object { $_.id -eq $id } }
+function SDo($type, $dev, $extra = @{}) { $a = @{ type = $type; device = $dev }; foreach ($k in $extra.Keys) { $a[$k] = $extra[$k] }; @{ type = 'do'; action = $a } }
+function SEvent($text) { @{ type = 'do'; action = @{ type = 'event'; text = $text } } }
+function SWait($secs) { @{ type = 'wait'; seconds = $secs } }
+
+# ---- timers
+$r = Call POST '/automation/timers' (Timer 'smoke_t' 2)
+Check 'timer accepted' ($r.code -eq 202)
+Start-Sleep -Milliseconds 1200
+Check 'timer listed, stopped' ((TimerStatus 'smoke_t') -and (TimerStatus 'smoke_t').running -eq $false -and (TimerStatus 'smoke_t').duration_s -eq 2)
+Check 'duplicate timer refused (409)' ((Call POST '/automation/timers' (Timer 'smoke_t' 5)).code -eq 409)
+Check 'timer length 0 refused' ((Call POST '/automation/timers' (Timer 'smoke_x' 0)).json.error -eq 'bad_timer')
+Check 'timer length 86401 refused' ((Call POST '/automation/timers' (Timer 'smoke_x' 86401)).json.error -eq 'bad_timer')
+Check 'bad timer id refused' ((Call POST '/automation/timers' (Timer 'Bad Id' 5)).json.error -eq 'bad_id')
+Check 'start of an unknown timer is 404' ((Call POST '/automation/timers/start?id=smoke_nope').code -eq 404)
+$null = Call POST '/automation/timers/start?id=smoke_t'
+Start-Sleep -Milliseconds 900
+$t = TimerStatus 'smoke_t'
+Check 'a started timer counts down' ($t.running -eq $true -and $t.remaining_s -le 2 -and $t.remaining_s -ge 1)
+Start-Sleep -Milliseconds 2500
+$t = TimerStatus 'smoke_t'
+Check 'it finishes by itself' ($t.running -eq $false -and $t.finished -ge 1)
+Check 'the event log shows timer_done' ([bool](Events | Where-Object { $_.rule -eq 'smoke_t' -and $_.kind -eq 'timer_done' }))
+$null = Call POST '/automation/timers/start?id=smoke_t'
+Start-Sleep -Milliseconds 700
+$null = Call POST '/automation/timers/stop?id=smoke_t'
+Start-Sleep -Milliseconds 800
+Check 'a stopped timer does not finish' ((TimerStatus 'smoke_t').running -eq $false)
+$null = Call PUT '/automation/timers' (Timer 'smoke_t' 30)
+Start-Sleep -Milliseconds 1200
+Check 'timer replaced' ((TimerStatus 'smoke_t').duration_s -eq 30)
+Check 'replace of an unknown timer is 404' ((Call PUT '/automation/timers' (Timer 'smoke_nope' 5)).code -eq 404)
+
+# ---- sequences: validation
+$ev = @(SEvent 'x')
+$badSeq = @(
+  @('no steps', (Seq 'smoke_q' @()), 'bad_steps'),
+  @('17 steps', (Seq 'smoke_q' @(1..17 | ForEach-Object { SWait 1 })), 'bad_steps'),
+  @('wait of 0', (Seq 'smoke_q' @(SWait 0)), 'bad_time'),
+  @('until without a timeout', (Seq 'smoke_q' @(@{ type = 'until'; condition = @{ device = 'smoke_sr'; property = 'state'; operator = '=='; value = 1 }; timeout_s = 0 })), 'bad_time'),
+  @('a step on an unknown device', (Seq 'smoke_q' @(SDo 'on' 'smoke_nope')), 'unknown_device'),
+  @('pwm set to 101 in a step', (Seq 'smoke_q' @(SDo 'set' 'smoke_sp' @{ value = 101 })), 'bad_action'),
+  @('a sequence cannot start a sequence', (Seq 'smoke_q' @(SDo 'seq_start' 'smoke_q')), 'bad_action'),
+  @('timer_start on an unknown timer', (Seq 'smoke_q' @(SDo 'timer_start' 'smoke_nope')), 'unknown_target'),
+  @('a repeating sequence with no waiting', (Seq 'smoke_q' @(SDo 'on' 'smoke_sr') 3), 'bad_loop'),
+  @('repeat forever with no waiting', (Seq 'smoke_q' @(SDo 'on' 'smoke_sr') 0), 'bad_loop'),
+  @('bad sequence id', (Seq 'Bad Id' @(SWait 1)), 'bad_id'),
+  @('unknown step type', (Seq 'smoke_q' @(@{ type = 'jump' })), 'bad_steps'),
+  @('a duration inside a guard', (Seq 'smoke_q' @(@{ type = 'do'; action = @{ type = 'on'; device = 'smoke_sr' }; guard = @{ device = 'smoke_sr'; property = 'state'; operator = '=='; value = 0; for_s = 5 } })), 'bad_duration')
+)
+foreach ($b in $badSeq) {
+  $r = Call POST '/automation/sequences' $b[1]
+  Check ("sequence refused: " + $b[0]) ((($r.code -eq 400) -or ($r.code -eq 409)) -and ($r.json.error -eq $b[2]))
+}
+Start-Sleep -Milliseconds 800
+Check 'refused sequences were not stored' (-not ((Call GET '/automation').json.sequences | Where-Object { $_.id -eq 'smoke_q' }))
+
+# ---- a sequence that runs: relay on, wait, event
+$null = Call POST '/automation/sequences' (Seq 'smoke_q' @((SDo 'on' 'smoke_sr'), (SWait 1), (SEvent 'smoke_done')))
+Start-Sleep -Milliseconds 1200
+$one = (Call GET '/automation').json.sequences | Where-Object { $_.id -eq 'smoke_q' }
+Check 'sequence stored and listed' ($one -and $one.steps.Count -eq 3 -and $one.steps[1].seconds -eq 1)
+Check 'start of an unknown sequence is 404' ((Call POST '/automation/sequences/start?id=smoke_nope').code -eq 404)
+
+# a rule that watches the sequence finish
+$null = Call POST '/automation/rules' (Rule 'smoke_sw' @{ type = 'sequence'; device = 'smoke_q'; event = 'done' } @(@{ type = 'event'; text = 'seq_done' }))
+Start-Sleep -Milliseconds 1200
+Check 'a rule can trigger on a sequence' ([bool](RuleStatus 'smoke_sw'))
+Check 'a rule on an unknown sequence is refused' ((Call POST '/automation/rules' (Rule 'smoke_sx' @{ type = 'sequence'; device = 'smoke_nope' } $evt)).json.error -eq 'unknown_target')
+Check 'a rule on an unknown timer is refused' ((Call POST '/automation/rules' (Rule 'smoke_sx' @{ type = 'timer'; device = 'smoke_nope' } $evt)).json.error -eq 'unknown_target')
+Check 'a rule action on an unknown sequence is refused' ((Call POST '/automation/rules' (Rule 'smoke_sx' @{ type = 'manual' } @(@{ type = 'seq_start'; device = 'smoke_nope' }))).json.error -eq 'unknown_target')
+
+$null = Call POST '/automation/sequences/start?id=smoke_q'
+Start-Sleep -Milliseconds 700
+$q = SeqStatus 'smoke_q'
+Check 'the sequence is running, past step 1' ($q.state -eq 'running' -and $q.step -ge 2)
+Check 'its first step turned the relay on' ((Dev 'smoke_sr').state.on -eq $true)
+Start-Sleep -Milliseconds 2200
+$q = SeqStatus 'smoke_q'
+Check 'it finished and counted it' ($q.state -eq 'idle' -and $q.done -ge 1)
+Check 'the event log shows sequence_done' ([bool](Events | Where-Object { $_.rule -eq 'smoke_q' -and $_.kind -eq 'sequence_done' }))
+Check 'the rule that watches it ran once' ((RuleStatus 'smoke_sw').fired -eq 1)
+
+# ---- pause, resume, stop
+$null = Call PUT '/automation/sequences' (Seq 'smoke_q' @((SWait 30), (SEvent 'late')))
+Start-Sleep -Milliseconds 1200
+$null = Call POST '/automation/sequences/start?id=smoke_q'
+Start-Sleep -Milliseconds 800
+Check 'a long sequence is running' ((SeqStatus 'smoke_q').state -eq 'running')
+$null = Call POST '/automation/sequences/pause?id=smoke_q'
+Start-Sleep -Milliseconds 800
+Check 'it can be paused' ((SeqStatus 'smoke_q').state -eq 'paused')
+$null = Call POST '/automation/sequences/resume?id=smoke_q'
+Start-Sleep -Milliseconds 800
+Check 'and resumed' ((SeqStatus 'smoke_q').state -eq 'running')
+$null = Call POST '/automation/sequences/stop?id=smoke_q'
+Start-Sleep -Milliseconds 800
+$q = SeqStatus 'smoke_q'
+Check 'and stopped' ($q.state -eq 'idle' -and $q.stopped -ge 1 -and $q.done -eq 0)
+Check 'the event log shows sequence_stopped' ([bool](Events | Where-Object { $_.rule -eq 'smoke_q' -and $_.kind -eq 'sequence_stopped' }))
+
+# ---- a rule that starts a timer, a timer rule, and the dashboard component
+$null = Call POST '/automation/rules' (Rule 'smoke_ts' @{ type = 'manual' } @(@{ type = 'timer_start'; device = 'smoke_t' }))
+$null = Call POST '/automation/rules' (Rule 'smoke_tw' @{ type = 'timer'; device = 'smoke_t' } @(@{ type = 'event'; text = 'tick' }))
+Start-Sleep -Milliseconds 1500
+$null = Call PUT '/automation/timers' (Timer 'smoke_t' 2)
+Start-Sleep -Milliseconds 1200
+$null = Call POST '/automation/rules/run?id=smoke_ts'
+Start-Sleep -Milliseconds 1000
+Check 'a rule can start a timer' ((TimerStatus 'smoke_t').running -eq $true)
+Start-Sleep -Milliseconds 2500
+Check 'a rule triggers when a timer finishes' ((RuleStatus 'smoke_tw').fired -eq 1)
+
+$tcomp = @{ id = 'c1'; type = 'timer'; label = 'Tea'; tab = 0; binding = @{ device = 'smoke_t' }; layout = @{ column = 1; row = 1; width = 2; height = 1 } }
+$r = Call PUT '/dashboard' (Doc 'manual' @($tcomp))
+Check 'a dashboard timer component is accepted' ($r.code -eq 200)
+$tcomp.binding.device = 'smoke_nope'
+$r = Call PUT '/dashboard' (Doc 'manual' @($tcomp))
+Check 'a timer component on a missing timer is refused' ($r.code -eq 400 -and $r.json.reason -eq 'unknown_device')
+$tcomp.binding.device = 'smoke_t'; $tcomp.layout.width = 1
+Check 'a timer component narrower than 2 is refused' ((Call PUT '/dashboard' (Doc 'manual' @($tcomp))).json.reason -eq 'bad_layout')
+$null = Call PUT '/dashboard' (Doc 'auto' @())
+
+# ---- the step pool: two sequences of 16 fill it
+$null = Call DELETE '/automation/sequences?id=smoke_q'
+Start-Sleep -Milliseconds 1000
+$big = @(1..16 | ForEach-Object { SWait 1 })
+$null = Call POST '/automation/sequences' (Seq 'smoke_b1' $big)
+Start-Sleep -Milliseconds 1200
+$null = Call POST '/automation/sequences' (Seq 'smoke_b2' $big)
+Start-Sleep -Milliseconds 1200
+$r = Call POST '/automation/sequences' (Seq 'smoke_b3' @(SWait 1))
+Check 'the 32-step pool is full: one more step is refused (409)' ($r.code -eq 409 -and $r.json.error -eq 'too_many')
+Check 'the status reports the pool' ((Call GET '/automation/status').json.steps_used -eq 32)
+
+# ---- clean up
+foreach ($id in 'smoke_sw', 'smoke_ts', 'smoke_tw') { Call DELETE "/automation/rules?id=$id" | Out-Null; Start-Sleep -Milliseconds 900 }
+foreach ($id in 'smoke_b1', 'smoke_b2') { Call DELETE "/automation/sequences?id=$id" | Out-Null; Start-Sleep -Milliseconds 900 }
+Call DELETE '/automation/timers?id=smoke_t' | Out-Null
+Start-Sleep -Milliseconds 900
+Check 'sequences and timers deleted' (-not ((Call GET '/automation').json.sequences | Where-Object { $_.id -like 'smoke_*' }) -and -not (TimerStatus 'smoke_t'))
+Check 'delete of an unknown sequence is 404' ((Call DELETE '/automation/sequences?id=smoke_nope').code -eq 404)
+Check 'delete of an unknown timer is 404' ((Call DELETE '/automation/timers?id=smoke_nope').code -eq 404)
+foreach ($id in 'smoke_sr', 'smoke_sp') { Call DELETE "/devices?id=$id" | Out-Null }
 WaitGone
 
 Write-Host ("`n{0} passed, {1} failed" -f $script:pass, $script:fail)

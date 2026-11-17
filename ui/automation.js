@@ -5,11 +5,17 @@
 let acfg = { enabled: true, utc_offset_min: 0, interlocks: [], rules: [] };
 let astat = null, asch = null;
 let adraft = null, aisNew = false, atimer = 0;
+let aseq = null, aseqNew = false, atim = null, atimNew = false;
 
 const WEEK = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const PN = { state: "on/off", level: "level", temp_c: "temperature", humidity: "humidity", pressure_hpa: "pressure", count: "count", ok: "reading ok" };
-const TRIG = { change: "A value changes", when: "Conditions become true", interval: "Every so often", schedule: "At a time of day", startup: "When the board starts", wifi: "Wi-Fi connects or drops", manual: "Run by hand only" };
-const ACT = { on: "Turn on", off: "Turn off", toggle: "Toggle", set: "Set value", stop: "Stop", send: "Send text", event: "Send an event" };
+const TRIG = { change: "A value changes", when: "Conditions become true", interval: "Every so often", schedule: "At a time of day", startup: "When the board starts", wifi: "Wi-Fi connects or drops", manual: "Run by hand only", timer: "A timer finishes", sequence: "A sequence finishes or stops" };
+const ACT = { on: "Turn on", off: "Turn off", toggle: "Toggle", set: "Set value", stop: "Stop", send: "Send text", event: "Send an event", seq_start: "Start", seq_stop: "Stop", timer_start: "Start", timer_stop: "Stop" };
+const seqs = () => acfg.sequences || [];
+const timers = () => acfg.timers || [];
+const tname = (id) => { const t = timers().find((x) => x.id === id); return t ? (t.name || t.id) : id + " (missing)"; };
+const sname = (id) => { const q = seqs().find((x) => x.id === id); return q ? (q.name || q.id) : id + " (missing)"; };
+const aMmss = (s) => Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
 const jsonBody = (m, b) => ({ method: m, headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) });
 const adev = (id) => devices.find((d) => d.id === id);
 const dname = (id) => (adev(id) ? adev(id).name : id + " (missing)");
@@ -27,6 +33,8 @@ function describeTrigger(t) {
     case "schedule": return "at " + t.time + " " + days(t.days);
     case "startup": return "when the board starts";
     case "wifi": return "when Wi-Fi " + t.event;
+    case "timer": return "when the timer " + tname(t.device) + " finishes";
+    case "sequence": return "when the sequence " + sname(t.device) + (t.event === "stopped" ? " is stopped early" : " finishes");
     default: return "only when run by hand";
   }
 }
@@ -40,6 +48,10 @@ function describeAction(a) {
   if (a.type === "event") return "send the event '" + a.text + "'";
   if (a.type === "set") return "set " + dname(a.device) + " to " + a.value;
   if (a.type === "send") return "send '" + a.text + "' to " + dname(a.device);
+  if (a.type === "seq_start") return "start the sequence " + sname(a.device);
+  if (a.type === "seq_stop") return "stop the sequence " + sname(a.device);
+  if (a.type === "timer_start") return "start the timer " + tname(a.device);
+  if (a.type === "timer_stop") return "stop the timer " + tname(a.device);
   return (ACT[a.type] || a.type).toLowerCase() + " " + dname(a.device);
 }
 
@@ -70,7 +82,8 @@ function autoTick() {
   clearTimeout(atimer);
   if ($("automation").hidden) return;
   if (adraft) { atimer = setTimeout(autoTick, 2000); return; }  // do not redraw under an open editor
-  autoStatus().finally(() => (atimer = setTimeout(autoTick, 2000)));
+  const fast = astat && (astat.timers || []).some((t) => t.running);
+  autoStatus().finally(() => (atimer = setTimeout(autoTick, fast ? 1000 : 2000)));
 }
 
 function statusOf(id) { return astat && astat.status ? astat.status.find((s) => s.id === id) : null; }
@@ -89,6 +102,24 @@ function autoRenderStatus() {
       (s.failed ? " Â· " + s.failed + " failed" : "") + (s.unconfirmed ? " Â· " + s.unconfirmed + " not confirmed" : "");
     line.className = "rstat" + (s.failed || s.unconfirmed ? " warn" : "");
   });
+  $("aseqlist").querySelectorAll("[data-seq]").forEach((card) => {
+    const q = (astat.sequences || []).find((x) => x.id === card.dataset.seq);
+    const line = card.querySelector(".live");
+    if (!q || !line) return;
+    line.textContent = q.state === "idle" ? "idle · finished " + q.done + "x, stopped " + q.stopped + "x" :
+      q.state + " · step " + q.step + " of " + q.steps + (q.repeat !== 1 ? " · pass " + q.pass : "") + (q.waiting_s !== undefined ? (q.until ? " · waiting for a condition, " : " · ") + q.waiting_s + " s" : "");
+    line.className = "live" + (q.state === "running" ? " on" : "");
+    const btns = card.querySelectorAll(".rbar button");
+    btns.forEach((b) => { if (b.dataset.ctl) b.hidden = !({ idle: ["start"], running: ["pause", "stop"], paused: ["resume", "stop"] }[q.state] || []).includes(b.dataset.ctl); });
+  });
+  $("atimerlist").querySelectorAll("[data-timer]").forEach((card) => {
+    const t = (astat.timers || []).find((x) => x.id === card.dataset.timer);
+    const line = card.querySelector(".live");
+    if (!t || !line) return;
+    line.textContent = (t.running ? "running · " + aMmss(t.remaining_s) + " left" : "stopped") + " · finished " + t.finished + "x";
+    line.className = "live" + (t.running ? " on" : "");
+    card.querySelectorAll(".rbar button").forEach((b) => { if (b.dataset.ctl === "stop") b.hidden = !t.running; });
+  });
   const ev = $("aevents");
   ev.replaceChildren(...(astat.events.length ? astat.events.map((e) => el("li", { textContent: ago(e.ago_s) + " Â· " + e.rule + " Â· " + e.kind + (e.text ? " Â· " + e.text : "") })) : [el("li", { className: "hint", textContent: "Nothing yet." })]));
 }
@@ -101,6 +132,8 @@ function autoRender() {
   list.replaceChildren(...acfg.rules.map(ruleCard));
   $("aempty").hidden = acfg.rules.length > 0;
   $("aadd").disabled = !!adraft || (asch && acfg.rules.length >= asch.limits.rules);
+  renderSeqs();
+  renderTimers();
   $("aeditor").hidden = !adraft;
   if (adraft) renderEditor();
   autoRenderStatus();
@@ -220,6 +253,15 @@ function renderEditor() {
   }
   if (t.type === "interval") { t.every_s = t.every_s || 60; f.append(field("Every (seconds)", inp(t, "every_s", { type: "number", min: 1, max: 86400 }, (v) => +v))); }
   if (t.type === "schedule") { t.time = t.time || "18:00"; f.append(field("Time", inp(t, "time", { type: "time" })), field("Days", dayBoxes(t))); }
+  if (t.type === "timer") {
+    if (!timers().some((x) => x.id === t.device)) t.device = (timers()[0] || {}).id;
+    f.append(timers().length ? field("Timer", sel(t, "device", timers().map((x) => [x.id, x.name || x.id]))) : el("p", { className: "warn", textContent: "Create a timer below first." }));
+  }
+  if (t.type === "sequence") {
+    if (!seqs().some((x) => x.id === t.device)) t.device = (seqs()[0] || {}).id;
+    t.event = t.event || "done";
+    f.append(seqs().length ? field("Sequence", sel(t, "device", seqs().map((x) => [x.id, x.name || x.id]))) : el("p", { className: "warn", textContent: "Create a sequence below first." }), field("When it", sel(t, "event", [["done", "finishes all its passes"], ["stopped", "is stopped early (stop, guard or timeout)"]])));
+  }
   if (t.type === "wifi") { t.event = t.event || "connected"; f.append(field("Event", sel(t, "event", [["connected", "connects"], ["disconnected", "drops"]]))); }
   if (t.type === "when" && !r.conditions.length) f.append(el("p", { className: "warn", textContent: "Add at least one condition below: this trigger watches them." }));
 
@@ -283,18 +325,33 @@ function actChoices(d) {
   return ["set"];
 }
 
-function actEditor(r, a, i) {
-  const box = el("fieldset", { className: "sub" });
+function actKind(a) { return a.type === "event" ? "event" : a.type.indexOf("timer_") === 0 ? "timer" : a.type.indexOf("seq_") === 0 ? "seq" : "device"; }
+function replaceObj(o, n) { Object.keys(o).forEach((k) => delete o[k]); Object.assign(o, n); }
+
+// The fields of one action. Edits `a` in place. allowSeq: rules may start and stop sequences, sequence steps may not.
+function actFields(box, a, redraw, allowSeq) {
   const cmdDevs = devices.filter((d) => d.props.some((p) => p.write) || d.type === "serial");
+  const kinds = [["device", "Command a device"], ["timer", "Start or stop a timer"], ["event", "Send an event"]];
+  if (allowSeq) kinds.splice(1, 0, ["seq", "Start or stop a sequence"]);
   const kind = el("select");
-  [["device", "Command a device"], ["event", "Send an event"]].forEach(([v, t]) => kind.append(el("option", { value: v, textContent: t, selected: (a.type === "event" ? "event" : "device") === v })));
+  kinds.forEach(([v, t]) => kind.append(el("option", { value: v, textContent: t, selected: actKind(a) === v })));
   kind.onchange = () => {
-    r.actions[i] = kind.value === "event" ? { type: "event", text: "hello" } : (() => { const d = cmdDevs[0]; return d ? { type: actChoices(d)[0], device: d.id, value: 0 } : { type: "event", text: "hello" }; })();
-    renderEditor();
+    const k = kind.value;
+    if (k === "event") replaceObj(a, { type: "event", text: "hello" });
+    else if (k === "timer") replaceObj(a, { type: "timer_start", device: (timers()[0] || {}).id || "" });
+    else if (k === "seq") replaceObj(a, { type: "seq_start", device: (seqs()[0] || {}).id || "" });
+    else { const d = cmdDevs[0]; replaceObj(a, d ? { type: actChoices(d)[0], device: d.id, value: 0 } : { type: "event", text: "hello" }); }
+    redraw();
   };
-  box.append(field("Action " + (i + 1), kind));
-  if (a.type === "event") {
+  box.append(field("What", kind));
+  const k = actKind(a);
+  if (k === "event") {
     box.append(field("Event name (15 characters)", inp(a, "text", { maxLength: 15 })));
+  } else if (k === "timer" || k === "seq") {
+    const list = k === "timer" ? timers() : seqs();
+    if (!list.some((x) => x.id === a.device)) a.device = (list[0] || {}).id || "";
+    if (!list.length) { box.append(el("p", { className: "warn", textContent: "Create a " + (k === "timer" ? "timer" : "sequence") + " first." })); return; }
+    box.append(field(k === "timer" ? "Timer" : "Sequence", sel(a, "device", list.map((x) => [x.id, x.name || x.id]))), field("Do", sel(a, "type", [[k + "_start", "Start"], [k + "_stop", "Stop"]])));
   } else {
     if (!adev(a.device)) { const d = cmdDevs[0]; a.device = d ? d.id : ""; }
     const d = adev(a.device);
@@ -308,6 +365,18 @@ function actEditor(r, a, i) {
     }
     if (a.type === "send") box.append(field("Text (15 characters)", inp(a, "text", { maxLength: 15 })));
   }
+}
+
+function cleanAction(a) {
+  if (a.type !== "set") delete a.value;
+  if (a.type !== "send" && a.type !== "event") delete a.text;
+  if (a.type === "event") delete a.device;
+}
+
+function actEditor(r, a, i) {
+  const box = el("fieldset", { className: "sub" });
+  box.append(el("legend", { textContent: "Action " + (i + 1) }));
+  actFields(box, a, renderEditor, true);
   const rm = el("button", { type: "button", textContent: "remove action" });
   rm.onclick = () => { r.actions.splice(i, 1); renderEditor(); };
   if (r.actions.length > 1) box.append(rm);
@@ -319,7 +388,7 @@ $("aeform").addEventListener("submit", async (e) => {
   const msg = $("aformmsg");
   msg.className = "";
   const body = clone(adraft);
-  body.actions.forEach((a) => { if (a.type !== "set") delete a.value; if (a.type !== "send" && a.type !== "event") delete a.text; if (a.type === "event") delete a.device; });
+  body.actions.forEach(cleanAction);
   if (body.trigger.type !== "when" && body.trigger.type !== "change") body.conditions.forEach((c) => delete c.for_s);
   try {
     await api("/automation/rules", jsonBody(aisNew ? "POST" : "PUT", body));
@@ -333,3 +402,216 @@ $("aeform").addEventListener("submit", async (e) => {
 });
 
 setInterval(() => { if (!$("automation").hidden && !wsLive) fetchDevices(); }, 3000);
+
+// ---- sequences -----------------------------------------------------------------------------------------
+
+function defaultCond() {
+  const d = devices.find((x) => numProps(x).length);
+  return d ? { device: d.id, property: numProps(d)[0], operator: ">", value: 0 } : { type: "time", from: "08:00", to: "20:00", days: [0, 1, 2, 3, 4, 5, 6] };
+}
+
+function repeatText(n) { return n === 1 ? "once" : n === 0 ? "until stopped" : n + " times"; }
+
+function describeStep(s) {
+  if (s.type === "wait") return "wait " + s.seconds + " s";
+  if (s.type === "until") return "wait until " + describeCond(s.condition) + " (at most " + s.timeout_s + " s, then " + (s.on_timeout === "stop" ? "stop" : "carry on") + ")";
+  return (s.guard ? "if " + describeCond(s.guard) + " then " : "") + describeAction(s.action) + (s.guard ? (s.else === "stop" ? ", otherwise stop" : ", otherwise skip") : "");
+}
+
+function seqCard(q) {
+  const card = el("div", { className: "card rule" });
+  card.dataset.seq = q.id;
+  card.append(el("div", { className: "top" }, el("strong", { textContent: q.name || q.id }), el("small", { textContent: q.steps.length + " steps · " + repeatText(q.repeat) })),
+    el("p", { className: "desc", textContent: q.steps.map((s, i) => (i + 1) + ". " + describeStep(s)).join("  ") }),
+    el("small", { className: "live", textContent: "" }));
+  const bar = el("div", { className: "rbar" });
+  const btn = (txt, ctl, fn) => { const b = el("button", { type: "button", textContent: txt }); if (ctl) b.dataset.ctl = ctl; b.onclick = fn; bar.append(b); };
+  ["start", "pause", "resume", "stop"].forEach((c) => btn(c[0].toUpperCase() + c.slice(1), c, () => post("/automation/sequences/" + c + "?id=" + q.id, "")));
+  btn("Edit", null, () => { aseq = clone(q); aseqNew = false; renderSeqs(); $("aseqeditor").scrollIntoView(); });
+  btn("Delete", null, () => { if (confirm("Delete the sequence '" + (q.name || q.id) + "'? Rules that start it will report an error.")) post("/automation/sequences?id=" + q.id, "", "DELETE"); });
+  card.append(bar);
+  bar.querySelectorAll("[data-ctl]").forEach((b) => (b.hidden = b.dataset.ctl !== "start"));
+  return card;
+}
+
+const stepsUsed = (except) => seqs().reduce((n, q) => n + (q.id === except ? 0 : q.steps.length), 0);
+
+function renderSeqs() {
+  $("aseqlist").replaceChildren(...seqs().map(seqCard));
+  $("aseqempty").hidden = seqs().length > 0;
+  $("aseqadd").disabled = !!aseq || (asch && seqs().length >= asch.limits.sequences);
+  $("aseqeditor").hidden = !aseq;
+  if (aseq) renderSeqEditor();
+  autoRenderStatus();
+}
+
+$("aseqadd").onclick = () => {
+  let n = 1;
+  while (seqs().some((q) => q.id === "seq" + n)) n++;
+  aseq = { id: "seq" + n, name: "", repeat: 1, steps: [{ type: "do", action: { type: "event", text: "start" } }] };
+  aseqNew = true;
+  renderSeqs();
+  $("aseqeditor").scrollIntoView();
+};
+
+// A condition held in holder[key]; its kind can switch between a device value and a time of day.
+function condFields(box, holder, key, redraw) {
+  const c = holder[key];
+  const kind = el("select");
+  [["compare", "A device value"], ["time", "Time of day"]].forEach(([v, t]) => kind.append(el("option", { value: v, textContent: t, selected: (c.type === "time" ? "time" : "compare") === v })));
+  kind.onchange = () => { holder[key] = kind.value === "time" ? { type: "time", from: "08:00", to: "20:00", days: [0, 1, 2, 3, 4, 5, 6] } : defaultCond(); redraw(); };
+  box.append(field("Condition", kind));
+  if (c.type === "time") {
+    box.append(field("From", inp(c, "from", { type: "time" })), field("To", inp(c, "to", { type: "time" })), field("Days", dayBoxes(c)));
+    return;
+  }
+  if (!adev(c.device)) c.device = (devices[0] || {}).id;
+  box.append(field("Device", sel(c, "device", devOptions((d) => numProps(d).length), true)));
+  const props = numProps(adev(c.device));
+  if (!props.includes(c.property)) c.property = props[0];
+  box.append(field("Property", sel(c, "property", props.map((p) => [p, PN[p] || p]))), field("Is", sel(c, "operator", asch.operators.map((o) => [o, o]))), field("Value (on = 1, off = 0)", inp(c, "value", { type: "number", step: "any" }, (v) => (v === "" ? 0 : +v))));
+}
+
+function stepBox(q, st, i) {
+  const box = el("fieldset", { className: "step" });
+  box.append(el("legend", { textContent: "Step " + (i + 1) }));
+  const kind = el("select");
+  [["do", "Do something"], ["wait", "Wait"], ["until", "Wait until a condition holds"]].forEach(([v, t]) => kind.append(el("option", { value: v, textContent: t, selected: st.type === v })));
+  kind.onchange = () => {
+    replaceObj(st, kind.value === "wait" ? { type: "wait", seconds: 5 } : kind.value === "until" ? { type: "until", condition: defaultCond(), timeout_s: 30, on_timeout: "continue" } : { type: "do", action: { type: "event", text: "hello" } });
+    renderSeqEditor();
+  };
+  box.append(field("Step type", kind));
+  if (st.type === "wait") {
+    box.append(field("Seconds (1 to 86400)", inp(st, "seconds", { type: "number", min: 1, max: 86400 }, (v) => +v)));
+  } else if (st.type === "until") {
+    condFields(box, st, "condition", renderSeqEditor);
+    box.append(field("Give up after (seconds)", inp(st, "timeout_s", { type: "number", min: 1, max: 86400 }, (v) => +v)), field("If it times out", sel(st, "on_timeout", [["continue", "carry on with the next step"], ["stop", "stop the sequence"]])));
+  } else {
+    actFields(box, st.action, renderSeqEditor, false);
+    const g = el("input", { type: "checkbox", checked: !!st.guard });
+    g.onchange = () => { if (g.checked) { st.guard = defaultCond(); st.else = "skip"; } else { delete st.guard; delete st.else; } renderSeqEditor(); };
+    box.append(el("label", { className: "row" }, g, "Only if a condition holds"));
+    if (st.guard) {
+      condFields(box, st, "guard", renderSeqEditor);
+      box.append(field("Otherwise", sel(st, "else", [["skip", "skip this step"], ["stop", "stop the sequence"]])));
+    }
+  }
+  const bar = el("div", { className: "rbar" });
+  const mv = (txt, d) => { const b = el("button", { type: "button", textContent: txt }); b.disabled = i + d < 0 || i + d >= q.steps.length; b.onclick = () => { const t = q.steps[i]; q.steps[i] = q.steps[i + d]; q.steps[i + d] = t; renderSeqEditor(); }; bar.append(b); };
+  mv("Move up", -1);
+  mv("Move down", 1);
+  if (q.steps.length > 1) { const rm = el("button", { type: "button", textContent: "Remove step" }); rm.onclick = () => { q.steps.splice(i, 1); renderSeqEditor(); }; bar.append(rm); }
+  box.append(bar);
+  return box;
+}
+
+function renderSeqEditor() {
+  const f = $("aseqform"), q = aseq;
+  f.replaceChildren();
+  f.append(el("h3", { textContent: aseqNew ? "New sequence" : "Edit " + q.id }));
+  const id = inp(q, "id", { maxLength: 16 });
+  id.readOnly = !aseqNew;
+  f.append(field("Id (letters, digits, _ and -)", id), field("Name", inp(q, "name", { maxLength: 24 })),
+    field("Repeat (1 = once, 0 = until stopped; more than once needs a wait step)", inp(q, "repeat", { type: "number", min: 0, max: 255 }, (v) => +v)));
+  const box = el("div", { className: "steps" });
+  q.steps.forEach((st, i) => box.append(stepBox(q, st, i)));
+  f.append(box);
+  const used = stepsUsed(aseqNew ? null : q.id) + q.steps.length;
+  const add = el("button", { type: "button", textContent: "+ step" });
+  add.disabled = q.steps.length >= asch.limits.steps || used >= asch.limits.steps_total;
+  add.onclick = () => { q.steps.push({ type: "wait", seconds: 5 }); renderSeqEditor(); };
+  f.append(add, el("small", { className: "hint", textContent: q.steps.length + " of " + asch.limits.steps + " steps here, " + used + " of " + asch.limits.steps_total + " in all sequences. A step that fails is logged and the sequence carries on; add a wait-until step to check a result." }));
+  const save = el("button", { type: "submit", textContent: "Save sequence" });
+  const cancel = el("button", { type: "button", textContent: "Cancel" });
+  cancel.onclick = () => { aseq = null; $("aseqmsg").textContent = ""; renderSeqs(); };
+  f.append(el("div", { className: "rbar" }, save, cancel));
+}
+
+$("aseqform").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const msg = $("aseqmsg");
+  msg.className = "";
+  const body = clone(aseq);
+  body.steps.forEach((s) => {
+    if (s.type === "do") { cleanAction(s.action); if (s.guard) delete s.guard.for_s; }
+    if (s.type === "until") delete s.condition.for_s;
+  });
+  try {
+    await api("/automation/sequences", jsonBody(aseqNew ? "POST" : "PUT", body));
+    aseq = null;
+    msg.textContent = "";
+    $("amsg").className = "";
+    $("amsg").textContent = "Saved.";
+    setTimeout(autoLoad, 700);
+    renderSeqs();
+  } catch (err) { msg.className = "err"; msg.textContent = "Rejected: " + err.message + (err.field ? " (" + err.field + ")" : ""); }
+});
+
+// ---- timers --------------------------------------------------------------------------------------------
+
+function timerCard(t) {
+  const card = el("div", { className: "card rule" });
+  card.dataset.timer = t.id;
+  card.append(el("div", { className: "top" }, el("strong", { textContent: t.name || t.id }), el("small", { textContent: aMmss(t.duration_s) + (t.repeat ? " · repeats" : "") })),
+    el("small", { className: "live", textContent: "" }));
+  const bar = el("div", { className: "rbar" });
+  const btn = (txt, ctl, fn) => { const b = el("button", { type: "button", textContent: txt }); if (ctl) b.dataset.ctl = ctl; b.onclick = fn; bar.append(b); };
+  btn("Start", "start", () => post("/automation/timers/start?id=" + t.id, ""));
+  btn("Stop", "stop", () => post("/automation/timers/stop?id=" + t.id, ""));
+  btn("Edit", null, () => { atim = { id: t.id, name: t.name, duration_s: t.duration_s, repeat: t.repeat }; atimNew = false; renderTimers(); $("atimereditor").scrollIntoView(); });
+  btn("Delete", null, () => { if (confirm("Delete the timer '" + (t.name || t.id) + "'? Rules that use it will report an error.")) post("/automation/timers?id=" + t.id, "", "DELETE"); });
+  card.append(bar);
+  return card;
+}
+
+function renderTimers() {
+  $("atimerlist").replaceChildren(...timers().map(timerCard));
+  $("atimerempty").hidden = timers().length > 0;
+  $("atimeradd").disabled = !!atim || (asch && timers().length >= asch.limits.timers);
+  $("atimereditor").hidden = !atim;
+  if (atim) renderTimerEditor();
+  autoRenderStatus();
+}
+
+$("atimeradd").onclick = () => {
+  let n = 1;
+  while (timers().some((t) => t.id === "timer" + n)) n++;
+  atim = { id: "timer" + n, name: "", duration_s: 60, repeat: false };
+  atimNew = true;
+  renderTimers();
+  $("atimereditor").scrollIntoView();
+};
+
+function renderTimerEditor() {
+  const f = $("atimerform"), t = atim;
+  f.replaceChildren();
+  f.append(el("h3", { textContent: atimNew ? "New timer" : "Edit " + t.id }));
+  const id = inp(t, "id", { maxLength: 16 });
+  id.readOnly = !atimNew;
+  const rep = el("input", { type: "checkbox", checked: t.repeat });
+  rep.onchange = () => (t.repeat = rep.checked);
+  f.append(field("Id (letters, digits, _ and -)", id), field("Name", inp(t, "name", { maxLength: 24 })),
+    field("Length (seconds, 1 to 86400)", inp(t, "duration_s", { type: "number", min: 1, max: 86400 }, (v) => +v)),
+    el("label", { className: "row" }, rep, "Start again by itself when it finishes"),
+    el("small", { className: "hint", textContent: "A timer counts down once it is started (from the Start button, a rule, a sequence or a dashboard Timer). Rules can start when it finishes. Editing a timer stops it." }));
+  const save = el("button", { type: "submit", textContent: "Save timer" });
+  const cancel = el("button", { type: "button", textContent: "Cancel" });
+  cancel.onclick = () => { atim = null; $("atimermsg").textContent = ""; renderTimers(); };
+  f.append(el("div", { className: "rbar" }, save, cancel));
+}
+
+$("atimerform").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const msg = $("atimermsg");
+  msg.className = "";
+  try {
+    await api("/automation/timers", jsonBody(atimNew ? "POST" : "PUT", atim));
+    atim = null;
+    msg.textContent = "";
+    $("amsg").className = "";
+    $("amsg").textContent = "Saved.";
+    setTimeout(autoLoad, 700);
+    renderTimers();
+  } catch (err) { msg.className = "err"; msg.textContent = "Rejected: " + err.message + (err.field ? " (" + err.field + ")" : ""); }
+});

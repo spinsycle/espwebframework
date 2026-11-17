@@ -1,5 +1,17 @@
 # Changelog
 
+## P7b
+- Sequences: a list of steps run by the board with no browser open. A step is **do** (one action, optionally only if a condition holds, otherwise skip the step or stop the sequence), **wait** (1 s to 24 h) or **until** (wait for a device condition, with a timeout that either carries on or stops the sequence). Start, stop, pause, resume; a sequence repeats a number of times or until stopped (a repeating sequence must contain a wait or until step). Status per sequence: idle / running / paused, current step, pass, seconds left to wait, finished and stopped counts. The engine does at most 8 steps in a pass and never uses `delay()`.
+- Timers: named countdowns (1 s to 24 h), optionally repeating. Started and stopped from a rule, a sequence step, the Automation tab, the REST API or a dashboard Timer. Editing a timer stops it. Timers and sequences are runtime state: a restart leaves them stopped and idle.
+- New rule triggers: a timer finishes, and a sequence finishes (or, as a separate choice, is stopped early by stop, a guard or a timeout). New rule actions: start / stop a sequence, start / stop a timer. A sequence cannot start or stop a sequence (no recursion); it can start and stop timers.
+- Dashboard: the 14th component, **Timer**, completing the spec's list: shows the time left, a progress bar and Start / Stop; at least 2 wide; it refuses a timer that does not exist.
+- Limits: 4 sequences, 16 steps each and 32 steps in all (about 80 bytes a step, allocated only for steps that exist), 6 timers; the earlier rule limits are unchanged. Interlocks also guard sequence steps. A do-step is not verified afterwards (unlike a rule action): follow it with an until step to wait for the result. A failed step is logged and the sequence carries on.
+- Switching the engine off freezes evaluation, but the clock does not stop: a timer or wait that came due while it was off completes right after it is switched on again.
+- REST: `GET/POST/PUT/DELETE /api/v1/automation/sequences` and `/timers` (whole definition in the body, `?id=` for delete), `POST /automation/sequences/start|stop|pause|resume?id=`, `POST /automation/timers/start|stop?id=`, `GET /automation/timers` (light, for the dashboard). `GET /automation` and `/automation/status` now include sequences and timers.
+- Known limits: deleting a sequence or timer that a rule uses is allowed (the rule reports `no_device` when it runs); the sequence and timer definitions are not part of the export / import bundle; no authentication until P8.
+- Memory: static RAM rose again (60.0% of the ESP8266's 80 KB). If heap gets tight the engine's fixed tables can be trimmed in P9.
+- Native tests 198, mutation check extended with 256 sequence, timer and dashboard-timer mutants; live API test extended.
+
 ## P7a
 - Automation engine, rules half. A rule is a trigger, optional conditions and up to four actions; rules are stored in `/config/automation.json` (temp file then rename, previous copy as `.bak`, removed by factory reset) and run entirely on the board, with no browser open.
 - Triggers: a value changes, conditions become true (fires once each time they go from false to true; the only trigger that accepts "for N seconds"), every N seconds, at a time of day on chosen weekdays, board startup, Wi-Fi connects or drops, and run by hand. The spec's "sequence completes" and timer events arrive with P7b.

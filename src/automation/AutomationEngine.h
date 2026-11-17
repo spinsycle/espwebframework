@@ -25,10 +25,27 @@ class AutomationEngine {
   AutoErr requestRun(const char* id);
   AutoErr requestSettings(const AutoSettings& s);
 
+  // Sequences and timers: same pattern. Controls (start / stop / pause / resume) are queued like any change.
+  AutoErr requestSeqAdd(const SeqDef& q);
+  AutoErr requestSeqReplace(const SeqDef& q);
+  AutoErr requestSeqRemove(const char* id);
+  AutoErr requestSeqCtl(AutomationCore::Ctl op, const char* id);
+  AutoErr requestTimerAdd(const TimerDef& t);
+  AutoErr requestTimerReplace(const TimerDef& t);
+  AutoErr requestTimerRemove(const char* id);
+  AutoErr requestTimerCtl(AutomationCore::Ctl op, const char* id);
+
   size_t count() const;
   bool ruleAt(size_t i, Rule& out) const;
   AutoSettings settings() const;
   bool clockSynced() const;
+  bool hasSeq(const char* id) const;
+  bool hasTimer(const char* id) const;
+  size_t seqCount() const;
+  bool seqAt(size_t i, SeqDef& out) const;  // out is ~1.5 KB: keep it on the heap
+  size_t timerCount() const;
+  bool describeSeq(size_t i, JsonObject out) const;
+  bool describeTimer(size_t i, JsonObject out) const;
 
   void describeStatusHead(JsonObject out) const;  // clock, switches, totals
   bool describeRule(size_t i, JsonObject out) const;  // one rule's status
@@ -37,14 +54,19 @@ class AutomationEngine {
 
  private:
   struct Pending {
-    enum Kind : uint8_t { Add, Replace, Remove, Enable, Run, Settings } kind = Add;
+    enum Kind : uint8_t { Add, Replace, Remove, Enable, Run, Settings, SeqAdd, SeqReplace, SeqRemove, SeqCtl, TimerAdd, TimerReplace, TimerRemove, TimerCtl } kind = Add;
     Rule rule;
     char id[kIdCap] = {0};
     bool flag = false;
     AutoSettings settings;
+    SeqDef* seq = nullptr;  // only sequence changes carry one (it is large)
+    TimerDef timer;
+    AutomationCore::Ctl ctl = AutomationCore::Ctl::SeqStart;
+    ~Pending() { delete seq; }
   };
   struct Env;
 
+  AutoRefs refs() const;
   AutoErr queue(Pending* p);
   void apply(const Pending& p);
 

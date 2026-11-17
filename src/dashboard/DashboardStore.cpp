@@ -4,6 +4,7 @@
 #include <LittleFS.h>
 #include <new>
 
+#include "automation/AutomationEngine.h"
 #include "config/ConfigRules.h"
 
 namespace espwf {
@@ -16,6 +17,8 @@ static const char* kBak = "/config/dashboard.json.bak";
 static bool lookup(void* ctx, const char* id, DeviceConfig& out) {
   return static_cast<DeviceRegistry*>(ctx)->config(id, out);
 }
+
+static bool timerExists(void* ctx, const char* id) { return static_cast<AutomationEngine*>(ctx)->hasTimer(id); }
 
 // Optional string into a fixed buffer. Wrong type or too long = false.
 static bool getStr(JsonVariantConst v, char* dst, unsigned cap) {
@@ -101,7 +104,7 @@ DashErr parseComponent(JsonVariantConst src, DashComp& c) {
   return DashErr::Ok;
 }
 
-Result validate(JsonVariantConst doc, DeviceRegistry& devices) {
+Result validate(JsonVariantConst doc, DeviceRegistry& devices, AutomationEngine* automation) {
   Result r;
   if (!doc.is<JsonObjectConst>()) { r.err = DashErr::Format; return r; }
   JsonVariantConst sv = doc["schema_version"];
@@ -147,7 +150,7 @@ Result validate(JsonVariantConst doc, DeviceRegistry& devices) {
   for (JsonVariantConst item : comps.as<JsonArrayConst>()) {
     *c = DashComp();
     DashErr e = parseComponent(item, *c);
-    if (e == DashErr::Ok) e = validateComponent(*c, lookup, &devices, nTabs);
+    if (e == DashErr::Ok) e = validateComponent(*c, lookup, &devices, nTabs, automation ? timerExists : nullptr, automation);
     if (e == DashErr::Ok) e = set->add(*c);
     if (e != DashErr::Ok) {
       r.err = e;
@@ -175,7 +178,7 @@ bool save(JsonVariantConst doc) {
 }
 
 static const char* needName(Need n) {
-  static const char* const names[] = {"card", "devices", "action", "write_state", "write_level", "read_number", "read_state", "read_text"};
+  static const char* const names[] = {"card", "devices", "action", "write_state", "write_level", "read_number", "read_state", "read_text", "timer"};
   return names[uint8_t(n)];
 }
 

@@ -12,6 +12,26 @@ static bool lookup(void* ctx, const char* id, DeviceConfig& out) {
   return static_cast<DeviceRegistry*>(ctx)->config(id, out);
 }
 
+static bool seqExists(void* ctx, const char* id) { return static_cast<AutomationEngine*>(ctx)->hasSeq(id); }
+static bool timerExists(void* ctx, const char* id) { return static_cast<AutomationEngine*>(ctx)->hasTimer(id); }
+
+AutoRefs AutomationEngine::refs() const {
+  AutoRefs r;
+  r.hasSeq = seqExists;
+  r.hasTimer = timerExists;
+  r.ctx = const_cast<AutomationEngine*>(this);
+  return r;
+}
+
+bool AutomationEngine::hasSeq(const char* id) const {
+  hal::CriticalSection cs;
+  return core_.findSeq(id) >= 0;
+}
+bool AutomationEngine::hasTimer(const char* id) const {
+  hal::CriticalSection cs;
+  return core_.findTimer(id) >= 0;
+}
+
 // What the rules see of the outside world.
 struct AutomationEngine::Env : AutoEnv {
   DeviceRegistry& dev;
@@ -51,7 +71,8 @@ AutoErr AutomationEngine::queue(Pending* p) {
 }
 
 AutoErr AutomationEngine::requestAdd(const Rule& r) {
-  AutoErr e = validateRule(r, lookup, devices_);
+  AutoRefs rf = refs();
+  AutoErr e = validateRule(r, lookup, devices_, &rf);
   if (e != AutoErr::Ok) return e;
   {
     hal::CriticalSection cs;
@@ -66,7 +87,8 @@ AutoErr AutomationEngine::requestAdd(const Rule& r) {
 }
 
 AutoErr AutomationEngine::requestReplace(const Rule& r) {
-  AutoErr e = validateRule(r, lookup, devices_);
+  AutoRefs rf = refs();
+  AutoErr e = validateRule(r, lookup, devices_, &rf);
   if (e != AutoErr::Ok) return e;
   {
     hal::CriticalSection cs;
@@ -126,6 +148,120 @@ AutoErr AutomationEngine::requestSettings(const AutoSettings& s) {
   return queue(p);
 }
 
+AutoErr AutomationEngine::requestSeqAdd(const SeqDef& q) {
+  AutoRefs rf = refs();
+  AutoErr e = validateSeq(q, lookup, devices_, &rf);
+  if (e != AutoErr::Ok) return e;
+  {
+    hal::CriticalSection cs;
+    if (core_.findSeq(q.id) >= 0) return AutoErr::Duplicate;
+    if (core_.seqCount() >= kMaxSeqs || core_.stepsUsed() + q.nSteps > kMaxStepsTotal) return AutoErr::TooMany;
+  }
+  Pending* p = new (std::nothrow) Pending;
+  if (!p) return AutoErr::TooMany;
+  p->seq = new (std::nothrow) SeqDef(q);
+  if (!p->seq) { delete p; return AutoErr::TooMany; }
+  p->kind = Pending::SeqAdd;
+  return queue(p);
+}
+
+AutoErr AutomationEngine::requestSeqReplace(const SeqDef& q) {
+  AutoRefs rf = refs();
+  AutoErr e = validateSeq(q, lookup, devices_, &rf);
+  if (e != AutoErr::Ok) return e;
+  {
+    hal::CriticalSection cs;
+    int i = core_.findSeq(q.id);
+    if (i < 0) return AutoErr::NotFound;
+    if (core_.stepsUsed() - core_.seq(size_t(i)).n + q.nSteps > kMaxStepsTotal) return AutoErr::TooMany;
+  }
+  Pending* p = new (std::nothrow) Pending;
+  if (!p) return AutoErr::TooMany;
+  p->seq = new (std::nothrow) SeqDef(q);
+  if (!p->seq) { delete p; return AutoErr::TooMany; }
+  p->kind = Pending::SeqReplace;
+  return queue(p);
+}
+
+AutoErr AutomationEngine::requestSeqRemove(const char* id) {
+  if (!hasSeq(id)) return AutoErr::NotFound;
+  Pending* p = new (std::nothrow) Pending;
+  if (!p) return AutoErr::TooMany;
+  p->kind = Pending::SeqRemove;
+  copyStr(p->id, id, sizeof p->id);
+  return queue(p);
+}
+
+AutoErr AutomationEngine::requestSeqCtl(AutomationCore::Ctl op, const char* id) {
+  if (!hasSeq(id)) return AutoErr::NotFound;
+  Pending* p = new (std::nothrow) Pending;
+  if (!p) return AutoErr::TooMany;
+  p->kind = Pending::SeqCtl;
+  p->ctl = op;
+  copyStr(p->id, id, sizeof p->id);
+  return queue(p);
+}
+
+AutoErr AutomationEngine::requestTimerAdd(const TimerDef& t) {
+  AutoErr e = validateTimer(t);
+  if (e != AutoErr::Ok) return e;
+  {
+    hal::CriticalSection cs;
+    if (core_.findTimer(t.id) >= 0) return AutoErr::Duplicate;
+    if (core_.timerCount() >= kMaxTimers) return AutoErr::TooMany;
+  }
+  Pending* p = new (std::nothrow) Pending;
+  if (!p) return AutoErr::TooMany;
+  p->kind = Pending::TimerAdd;
+  p->timer = t;
+  return queue(p);
+}
+
+AutoErr AutomationEngine::requestTimerReplace(const TimerDef& t) {
+  AutoErr e = validateTimer(t);
+  if (e != AutoErr::Ok) return e;
+  if (!hasTimer(t.id)) return AutoErr::NotFound;
+  Pending* p = new (std::nothrow) Pending;
+  if (!p) return AutoErr::TooMany;
+  p->kind = Pending::TimerReplace;
+  p->timer = t;
+  return queue(p);
+}
+
+AutoErr AutomationEngine::requestTimerRemove(const char* id) {
+  if (!hasTimer(id)) return AutoErr::NotFound;
+  Pending* p = new (std::nothrow) Pending;
+  if (!p) return AutoErr::TooMany;
+  p->kind = Pending::TimerRemove;
+  copyStr(p->id, id, sizeof p->id);
+  return queue(p);
+}
+
+AutoErr AutomationEngine::requestTimerCtl(AutomationCore::Ctl op, const char* id) {
+  if (!hasTimer(id)) return AutoErr::NotFound;
+  Pending* p = new (std::nothrow) Pending;
+  if (!p) return AutoErr::TooMany;
+  p->kind = Pending::TimerCtl;
+  p->ctl = op;
+  copyStr(p->id, id, sizeof p->id);
+  return queue(p);
+}
+
+size_t AutomationEngine::seqCount() const {
+  hal::CriticalSection cs;
+  return core_.seqCount();
+}
+size_t AutomationEngine::timerCount() const {
+  hal::CriticalSection cs;
+  return core_.timerCount();
+}
+bool AutomationEngine::seqAt(size_t i, SeqDef& out) const {
+  hal::CriticalSection cs;  // a plain copy of the steps; the JSON is built outside
+  if (i >= core_.seqCount()) return false;
+  core_.seqDef(i, out);
+  return true;
+}
+
 size_t AutomationEngine::count() const {
   hal::CriticalSection cs;
   return core_.count();
@@ -174,6 +310,38 @@ void AutomationEngine::apply(const Pending& p) {
       break;
     }
     case Pending::Run: core_.requestRun(p.id); break;
+    case Pending::SeqAdd: {
+      hal::CriticalSection cs;
+      changed = core_.addSeq(*p.seq) == AutoErr::Ok;
+      break;
+    }
+    case Pending::SeqReplace: {
+      hal::CriticalSection cs;
+      changed = core_.replaceSeq(*p.seq) == AutoErr::Ok;
+      break;
+    }
+    case Pending::SeqRemove: {
+      hal::CriticalSection cs;
+      changed = core_.removeSeq(p.id);
+      break;
+    }
+    case Pending::SeqCtl:
+    case Pending::TimerCtl: core_.requestCtl(p.ctl, p.id); break;  // runs on the next tick; nothing to save
+    case Pending::TimerAdd: {
+      hal::CriticalSection cs;
+      changed = core_.addTimer(p.timer) == AutoErr::Ok;
+      break;
+    }
+    case Pending::TimerReplace: {
+      hal::CriticalSection cs;
+      changed = core_.replaceTimer(p.timer) == AutoErr::Ok;
+      break;
+    }
+    case Pending::TimerRemove: {
+      hal::CriticalSection cs;
+      changed = core_.removeTimer(p.id);
+      break;
+    }
     case Pending::Settings: {
       hal::CriticalSection cs;
       core_.settings = p.settings;
@@ -219,6 +387,8 @@ void AutomationEngine::describeStatusHead(JsonObject out) const {
   }
   out["rules"] = count();
   out["max_rules"] = kMaxRules;
+  out["steps_used"] = core_.stepsUsed();
+  out["max_steps"] = kMaxStepsTotal;
   out["firings_this_second"] = core_.firingsThisSecond();
 }
 
@@ -240,6 +410,59 @@ bool AutomationEngine::describeRule(size_t i, JsonObject out) const {
   out["unconfirmed"] = s.unconfirmed;
   out["last"] = lastName(s.last);
   if (s.everFired) out["fired_ago_s"] = (millis() - s.lastFire) / 1000;
+  return true;
+}
+
+bool AutomationEngine::describeSeq(size_t i, JsonObject out) const {
+  char id[kIdCap], name[kRuleNameCap];
+  uint8_t repeat, n;
+  AutomationCore::SeqRun r;
+  {
+    hal::CriticalSection cs;
+    if (i >= core_.seqCount()) return false;
+    copyStr(id, core_.seq(i).id, sizeof id);
+    copyStr(name, core_.seq(i).name, sizeof name);
+    repeat = core_.seq(i).repeat;
+    n = core_.seq(i).n;
+    r = core_.seqRun(i);
+  }
+  uint32_t now = millis();
+  out["id"] = id;
+  out["name"] = name;
+  out["state"] = r.st == AutomationCore::SeqRunState::Running ? "running" : r.st == AutomationCore::SeqRunState::Paused ? "paused" : "idle";
+  out["steps"] = n;
+  out["repeat"] = repeat;
+  out["done"] = r.done;
+  out["stopped"] = r.stopped;
+  if (r.st != AutomationCore::SeqRunState::Idle) {
+    out["step"] = r.step < n ? r.step + 1 : n;
+    out["pass"] = r.loop + 1;
+    uint32_t until = r.inUntil ? r.deadline : r.resumeAt;
+    if (r.st == AutomationCore::SeqRunState::Paused) out["waiting_s"] = r.left / 1000;
+    else if (int32_t(until - now) > 0) out["waiting_s"] = (until - now) / 1000;
+    if (r.inUntil) out["until"] = true;
+  }
+  return true;
+}
+
+bool AutomationEngine::describeTimer(size_t i, JsonObject out) const {
+  TimerDef t;
+  AutomationCore::TimerRun r;
+  uint32_t left;
+  {
+    hal::CriticalSection cs;
+    if (i >= core_.timerCount()) return false;
+    t = core_.timer(i);
+    r = core_.timerRun(i);
+    left = core_.timerRemainingMs(i, millis());
+  }
+  out["id"] = t.id;
+  out["name"] = t.name;
+  out["duration_s"] = t.durationS;
+  out["repeat"] = t.repeat;
+  out["running"] = r.running;
+  out["remaining_s"] = (left + 999) / 1000;
+  out["finished"] = r.finished;
   return true;
 }
 

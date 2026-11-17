@@ -94,3 +94,11 @@ dt{color:var(--dim)} dd{margin:0;word-break:break-word}
 .events{margin:0;padding-left:18px;color:var(--dim)}
 #amsg,#aformmsg{min-height:1.4em;color:var(--dim)}
 #amsg.err,#aformmsg.err{color:var(--bad)}
+
+.rule .live{font-size:14px;color:var(--dim)}
+.rule .live.on{color:var(--ok)}
+.steps{display:grid;gap:8px}
+.step{border:1px solid var(--line);border-radius:8px;padding:10px;display:grid;gap:8px;margin:0}
+.step legend{color:var(--dim);font-size:13px;padding:0 4px}
+#aseqform,#atimerform{max-width:560px}
+#aseqform button:not([type=submit]),#atimerform button:not([type=submit]){background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:7px 12px;font:inherit;font-size:14px}

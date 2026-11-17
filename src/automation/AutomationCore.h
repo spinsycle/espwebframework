@@ -28,9 +28,9 @@ inline bool localClock(uint32_t epochUtc, int16_t offsetMin, ClockInfo& ci) {
   return true;
 }
 
-enum class EvKind : uint8_t { Fired, Failed, Blocked, Unconfirmed, Storm, Custom };
+enum class EvKind : uint8_t { Fired, Failed, Blocked, Unconfirmed, Storm, Custom, SeqDone, SeqStopped, TimerDone };
 inline const char* evKindName(EvKind k) {
-  static const char* const n[] = {"fired", "failed", "blocked", "unconfirmed", "storm", "event"};
+  static const char* const n[] = {"fired", "failed", "blocked", "unconfirmed", "storm", "event", "sequence_done", "sequence_stopped", "timer_done"};
   return n[uint8_t(k)];
 }
 
@@ -38,6 +38,15 @@ enum class Last : uint8_t { None, Ok, Rejected, Blocked, NoDevice, Cooldown, Sto
 inline const char* lastName(Last l) {
   static const char* const n[] = {"none", "ok", "rejected", "blocked", "no_device", "cooldown", "storm", "conditions_false"};
   return n[uint8_t(l)];
+}
+
+class AutoEnv;
+
+// A time-of-day window. Needs a clock; a window with from > to wraps midnight.
+inline bool timeCondHolds(const Cond& c, const ClockInfo& ci, bool haveClock) {
+  if (!haveClock || !((c.days >> ci.weekday) & 1)) return false;
+  uint16_t m = ci.minuteOfDay;
+  return c.from < c.to ? (m >= c.from && m < c.to) : (m >= c.from || m < c.to);  // from > to wraps midnight
 }
 
 class AutoEnv {
@@ -64,6 +73,7 @@ struct RuleState {
   uint32_t lastMinuteKey = 0;
   uint32_t since[kMaxConds] = {0};
   uint16_t fired = 0, failed = 0, unconfirmed = 0;
+  uint16_t seen = 0;  // timer / sequence triggers: the finish count already acted on
   Last last = Last::None;
 };
 
@@ -83,10 +93,18 @@ class AutomationCore {
   static constexpr uint32_t kStartupMs = 3000;   // "startup" rules fire this long after boot
   static constexpr size_t kEvents = 8;
   static constexpr size_t kVerifies = 8;
+  static constexpr size_t kCtlSlots = 4;
+  static constexpr int kStepsPerPass = 8;  // a sequence runs at most this many steps in one tick
 
   AutoSettings settings;
 
-  ~AutomationCore() { delete[] rules_; delete[] st_; }
+  ~AutomationCore() {
+    delete[] rules_;
+    delete[] st_;
+    for (size_t i = 0; i < nSeq_; i++) delete[] seqs_[i].steps;
+    delete[] seqs_;
+    delete[] sr_;
+  }
 
   size_t count() const { return n_; }
   const Rule& rule(size_t i) const { return rules_[i]; }
@@ -148,6 +166,148 @@ class AutomationCore {
     return true;
   }
 
+  // ---- sequences (steps live in exactly sized arrays; at most kMaxStepsTotal steps in all)
+
+  enum class SeqRunState : uint8_t { Idle, Running, Paused };
+  struct SeqStore {
+    char id[kIdCap] = {0};
+    char name[kRuleNameCap] = {0};
+    uint8_t repeat = 1;
+    uint8_t n = 0;
+    Step* steps = nullptr;
+  };
+  struct SeqRun {
+    SeqRunState st = SeqRunState::Idle;
+    uint8_t step = 0, loop = 0;
+    bool inUntil = false;
+    uint32_t resumeAt = 0, deadline = 0, left = 0;
+    uint16_t done = 0, stopped = 0;
+  };
+  struct TimerRun {
+    bool running = false;
+    uint32_t endAt = 0;
+    uint16_t finished = 0;
+  };
+
+  size_t seqCount() const { return nSeq_; }
+  const SeqStore& seq(size_t i) const { return seqs_[i]; }
+  const SeqRun& seqRun(size_t i) const { return sr_[i]; }
+  int findSeq(const char* id) const {
+    for (size_t i = 0; i < nSeq_; i++)
+      if (!strcmp(seqs_[i].id, id)) return int(i);
+    return -1;
+  }
+  size_t stepsUsed() const {
+    size_t n = 0;
+    for (size_t i = 0; i < nSeq_; i++) n += seqs_[i].n;
+    return n;
+  }
+  void seqDef(size_t i, SeqDef& out) const {
+    copyStr(out.id, seqs_[i].id, sizeof out.id);
+    copyStr(out.name, seqs_[i].name, sizeof out.name);
+    out.repeat = seqs_[i].repeat;
+    out.nSteps = seqs_[i].n;
+    for (size_t k = 0; k < seqs_[i].n; k++) out.steps[k] = seqs_[i].steps[k];
+  }
+
+  AutoErr addSeq(const SeqDef& d) {
+    if (findSeq(d.id) >= 0) return AutoErr::Duplicate;
+    if (nSeq_ >= kMaxSeqs || stepsUsed() + d.nSteps > kMaxStepsTotal) return AutoErr::TooMany;
+    Step* steps = new (std::nothrow) Step[d.nSteps ? d.nSteps : 1];
+    SeqStore* ns = new (std::nothrow) SeqStore[nSeq_ + 1];
+    SeqRun* nr = new (std::nothrow) SeqRun[nSeq_ + 1];
+    if (!steps || !ns || !nr) { delete[] steps; delete[] ns; delete[] nr; return AutoErr::TooMany; }
+    for (size_t k = 0; k < d.nSteps; k++) steps[k] = d.steps[k];
+    for (size_t i = 0; i < nSeq_; i++) { ns[i] = seqs_[i]; nr[i] = sr_[i]; }  // the steps move by pointer
+    copyStr(ns[nSeq_].id, d.id, kIdCap);
+    copyStr(ns[nSeq_].name, d.name, kRuleNameCap);
+    ns[nSeq_].repeat = d.repeat;
+    ns[nSeq_].n = d.nSteps;
+    ns[nSeq_].steps = steps;
+    delete[] seqs_;
+    delete[] sr_;
+    seqs_ = ns;
+    sr_ = nr;
+    nSeq_++;
+    return AutoErr::Ok;
+  }
+
+  AutoErr replaceSeq(const SeqDef& d) {
+    int i = findSeq(d.id);
+    if (i < 0) return AutoErr::NotFound;
+    if (stepsUsed() - seqs_[i].n + d.nSteps > kMaxStepsTotal) return AutoErr::TooMany;
+    Step* steps = new (std::nothrow) Step[d.nSteps ? d.nSteps : 1];
+    if (!steps) return AutoErr::TooMany;
+    for (size_t k = 0; k < d.nSteps; k++) steps[k] = d.steps[k];
+    delete[] seqs_[i].steps;
+    copyStr(seqs_[i].name, d.name, kRuleNameCap);
+    seqs_[i].repeat = d.repeat;
+    seqs_[i].n = d.nSteps;
+    seqs_[i].steps = steps;
+    sr_[i].st = SeqRunState::Idle;  // an edited sequence starts over the next time it is started
+    sr_[i].inUntil = false;
+    return AutoErr::Ok;
+  }
+
+  bool removeSeq(const char* id) {
+    int i = findSeq(id);
+    if (i < 0) return false;
+    delete[] seqs_[i].steps;
+    seqs_[i].steps = nullptr;
+    for (size_t k = size_t(i) + 1; k < nSeq_; k++) { seqs_[k - 1] = seqs_[k]; sr_[k - 1] = sr_[k]; }
+    nSeq_--;
+    return true;
+  }
+
+  // ---- timers
+
+  size_t timerCount() const { return nTimer_; }
+  const TimerDef& timer(size_t i) const { return timers_[i]; }
+  const TimerRun& timerRun(size_t i) const { return tr_[i]; }
+  int findTimer(const char* id) const {
+    for (size_t i = 0; i < nTimer_; i++)
+      if (!strcmp(timers_[i].id, id)) return int(i);
+    return -1;
+  }
+  uint32_t timerRemainingMs(size_t i, uint32_t now) const {
+    return tr_[i].running && int32_t(tr_[i].endAt - now) > 0 ? tr_[i].endAt - now : 0;
+  }
+  AutoErr addTimer(const TimerDef& t) {
+    if (findTimer(t.id) >= 0) return AutoErr::Duplicate;
+    if (nTimer_ >= kMaxTimers) return AutoErr::TooMany;
+    timers_[nTimer_] = t;
+    tr_[nTimer_] = TimerRun();
+    nTimer_++;
+    return AutoErr::Ok;
+  }
+  AutoErr replaceTimer(const TimerDef& t) {
+    int i = findTimer(t.id);
+    if (i < 0) return AutoErr::NotFound;
+    timers_[i] = t;
+    tr_[i] = TimerRun();  // an edited timer is stopped
+    return AutoErr::Ok;
+  }
+  bool removeTimer(const char* id) {
+    int i = findTimer(id);
+    if (i < 0) return false;
+    for (size_t k = size_t(i) + 1; k < nTimer_; k++) { timers_[k - 1] = timers_[k]; tr_[k - 1] = tr_[k]; }
+    nTimer_--;
+    return true;
+  }
+
+  // ---- starting and stopping sequences and timers from outside (done at the next tick)
+
+  enum class Ctl : uint8_t { SeqStart, SeqStop, SeqPause, SeqResume, TimerStart, TimerStop };
+  bool requestCtl(Ctl op, const char* id) {
+    bool seq = op == Ctl::SeqStart || op == Ctl::SeqStop || op == Ctl::SeqPause || op == Ctl::SeqResume;
+    if ((seq ? findSeq(id) : findTimer(id)) < 0 || strlen(id) >= kIdCap) return false;
+    if (nCtl_ >= kCtlSlots) return false;
+    ctl_[nCtl_].op = op;
+    copyStr(ctl_[nCtl_].id, id, kIdCap);
+    nCtl_++;
+    return true;
+  }
+
   // ---- the event log, newest first
 
   size_t eventCount() const { return evN_; }
@@ -164,6 +324,11 @@ class AutomationCore {
     ClockInfo ci;
     bool haveClock = env.clock(ci);
     checkVerifies(env, now);
+
+    for (size_t k = 0; k < nCtl_; k++) ctlNow(ctl_[k].op, ctl_[k].id, env, now);
+    nCtl_ = 0;
+    tickTimers(env, now);
+    tickSeqs(env, now, ci, haveClock);
 
     if (runId_[0]) {
       int i = find(runId_);
@@ -234,6 +399,20 @@ class AutomationCore {
           }
           break;
         }
+        case TrigType::Timer:
+        case TrigType::Sequence: {  // fires each time the timer finishes / the sequence finishes (or is stopped early)
+          bool isTimer = r.trig.type == TrigType::Timer;
+          int k = isTimer ? findTimer(r.trig.device) : findSeq(r.trig.device);
+          if (k < 0) break;
+          uint16_t count = isTimer ? tr_[k].finished : (r.trig.onStopped ? sr_[k].stopped : sr_[k].done);
+          if (!s.havePrev) { s.havePrev = true; s.seen = count; break; }
+          if (count != s.seen) {
+            s.seen = count;
+            if (conds(i, env, now, ci, haveClock)) fire(i, env, now);
+            else s.last = Last::ConditionsFalse;
+          }
+          break;
+        }
         default: break;  // manual: only requestRun
       }
     }
@@ -258,6 +437,16 @@ class AutomationCore {
   EventRec ev_[kEvents];
   size_t evHead_ = 0, evN_ = 0;
   Verify ver_[kVerifies];
+
+  SeqStore* seqs_ = nullptr;
+  SeqRun* sr_ = nullptr;
+  size_t nSeq_ = 0;
+  TimerDef timers_[kMaxTimers];
+  TimerRun tr_[kMaxTimers];
+  size_t nTimer_ = 0;
+  struct CtlReq { Ctl op = Ctl::SeqStart; char id[kIdCap] = {0}; };
+  CtlReq ctl_[kCtlSlots];
+  size_t nCtl_ = 0;
 
   bool grow(size_t want) {
     Rule* nr = new (std::nothrow) Rule[want];
@@ -292,11 +481,7 @@ class AutomationCore {
   bool cond(size_t ri, size_t k, AutoEnv& env, uint32_t now, const ClockInfo& ci, bool haveClock) {
     const Cond& c = rules_[ri].conds[k];
     RuleState& s = st_[ri];
-    if (c.kind == CondKind::Time) {
-      if (!haveClock || !((c.days >> ci.weekday) & 1)) return false;
-      uint16_t m = ci.minuteOfDay;
-      return c.from < c.to ? (m >= c.from && m < c.to) : (m >= c.from || m < c.to);  // from > to wraps midnight
-    }
+    if (c.kind == CondKind::Time) return timeCondHolds(c, ci, haveClock);
     double v;
     bool ok = env.read(c.device, c.prop, v) && compare(c.op, v, double(c.value));
     if (c.forS == 0) return ok;
@@ -379,6 +564,10 @@ class AutomationCore {
     for (size_t k = 0; k < r.nActs; k++) {
       const Action& a = r.acts[k];
       if (a.type == ActType::Event) { log(env, now, r.id, EvKind::Custom, a.text); continue; }
+      if (a.type == ActType::SeqStart || a.type == ActType::SeqStop || a.type == ActType::TimerStart || a.type == ActType::TimerStop) {
+        if (!control(a.type, a.device, env, now)) { s.failed++; s.last = Last::NoDevice; log(env, now, r.id, EvKind::Failed, a.device); }
+        continue;
+      }
       DeviceType t;
       if (!env.deviceType(a.device, t)) { s.failed++; s.last = Last::NoDevice; log(env, now, r.id, EvKind::Failed, a.device); continue; }
       if (blockedByLock(env, a)) { s.failed++; s.last = Last::Blocked; log(env, now, r.id, EvKind::Blocked, a.device); continue; }
@@ -394,6 +583,160 @@ class AutomationCore {
       else if (a.type == ActType::Set) addVerify(ri, a.device, Prop::Level, a.value, now);
       else if (a.type == ActType::Stop) addVerify(ri, a.device, Prop::Level, 0, now);
     }
+  }
+
+  // ---- sequences and timers
+
+  bool control(ActType a, const char* id, AutoEnv& env, uint32_t now) {
+    switch (a) {
+      case ActType::SeqStart: return ctlNow(Ctl::SeqStart, id, env, now);
+      case ActType::SeqStop: return ctlNow(Ctl::SeqStop, id, env, now);
+      case ActType::TimerStart: return ctlNow(Ctl::TimerStart, id, env, now);
+      case ActType::TimerStop: return ctlNow(Ctl::TimerStop, id, env, now);
+      default: return false;
+    }
+  }
+
+  void stopSeq(size_t i, AutoEnv& env, uint32_t now, const char* why) {
+    sr_[i].st = SeqRunState::Idle;
+    sr_[i].inUntil = false;
+    sr_[i].stopped++;
+    log(env, now, seqs_[i].id, EvKind::SeqStopped, why);
+  }
+
+  bool ctlNow(Ctl op, const char* id, AutoEnv& env, uint32_t now) {
+    if (op == Ctl::TimerStart || op == Ctl::TimerStop) {
+      int t = findTimer(id);
+      if (t < 0) return false;
+      tr_[t].running = op == Ctl::TimerStart;
+      if (tr_[t].running) tr_[t].endAt = now + timers_[t].durationS * 1000UL;
+      return true;
+    }
+    int i = findSeq(id);
+    if (i < 0) return false;
+    SeqRun& r = sr_[i];
+    switch (op) {
+      case Ctl::SeqStart:
+        if (r.st != SeqRunState::Idle) return true;  // already going
+        {
+          uint16_t done = r.done, stopped = r.stopped;  // the counters survive a restart
+          r = SeqRun();
+          r.done = done;
+          r.stopped = stopped;
+        }
+        r.st = SeqRunState::Running;
+        r.resumeAt = now;
+        log(env, now, seqs_[i].id, EvKind::Fired, "");
+        break;
+      case Ctl::SeqStop:
+        if (r.st != SeqRunState::Idle) stopSeq(size_t(i), env, now, "stopped");
+        break;
+      case Ctl::SeqPause:
+        if (r.st == SeqRunState::Running) {
+          uint32_t until = r.inUntil ? r.deadline : r.resumeAt;
+          r.left = int32_t(until - now) > 0 ? until - now : 0;
+          r.st = SeqRunState::Paused;
+        }
+        break;
+      case Ctl::SeqResume:
+        if (r.st == SeqRunState::Paused) {
+          r.st = SeqRunState::Running;
+          if (r.inUntil) r.deadline = now + r.left;
+          else r.resumeAt = now + r.left;
+        }
+        break;
+      default: break;
+    }
+    return true;
+  }
+
+  void tickTimers(AutoEnv& env, uint32_t now) {
+    for (size_t i = 0; i < nTimer_; i++) {
+      TimerRun& t = tr_[i];
+      if (!t.running || int32_t(now - t.endAt) < 0) continue;
+      t.finished++;
+      log(env, now, timers_[i].id, EvKind::TimerDone, "");
+      uint32_t d = timers_[i].durationS * 1000UL;
+      if (!timers_[i].repeat) { t.running = false; continue; }
+      t.endAt += d;
+      if (int32_t(now - t.endAt) >= 0) t.endAt = now + d;  // far behind: do not burst
+    }
+  }
+
+  // A condition in a sequence step: no duration, no memory.
+  bool condNow(const Cond& c, AutoEnv& env, const ClockInfo& ci, bool haveClock) {
+    if (c.kind == CondKind::Time) return timeCondHolds(c, ci, haveClock);
+    double v;
+    return env.read(c.device, c.prop, v) && compare(c.op, v, double(c.value));
+  }
+
+  // The action of a "do" step. Sequence steps are not verified afterwards: wait for the result with an "until" step.
+  void stepAction(AutoEnv& env, const char* owner, const Action& a, uint32_t now) {
+    if (a.type == ActType::Event) { log(env, now, owner, EvKind::Custom, a.text); return; }
+    if (a.type == ActType::TimerStart || a.type == ActType::TimerStop) {
+      if (!control(a.type, a.device, env, now)) log(env, now, owner, EvKind::Failed, a.device);
+      return;
+    }
+    DeviceType t;
+    if (!env.deviceType(a.device, t)) { log(env, now, owner, EvKind::Failed, a.device); return; }
+    if (blockedByLock(env, a)) { log(env, now, owner, EvKind::Blocked, a.device); return; }
+    Command c;
+    if (!buildCommand(a, t, c) || env.command(a.device, c) != CmdErr::Ok) log(env, now, owner, EvKind::Failed, a.device);
+  }
+
+  // Runs what is due in one sequence. True = the next step may run in this same pass.
+  bool stepSeq(size_t i, AutoEnv& env, uint32_t now, const ClockInfo& ci, bool haveClock) {
+    SeqStore& q = seqs_[i];
+    SeqRun& r = sr_[i];
+    if (!r.inUntil && int32_t(now - r.resumeAt) < 0) return false;  // still waiting
+    if (r.step >= q.n) {                                              // end of a pass through the steps
+      r.loop++;
+      if (q.repeat == 0 || r.loop < q.repeat) {
+        r.step = 0;
+        r.resumeAt = now + kTickMs;
+        return false;
+      }
+      r.st = SeqRunState::Idle;
+      r.done++;
+      log(env, now, q.id, EvKind::SeqDone, "");
+      return false;
+    }
+    const Step& s = q.steps[r.step];
+    switch (s.type) {
+      case StepType::Do:
+        if (s.hasGuard && !condNow(s.cond, env, ci, haveClock)) {
+          if (s.stopOnFalse) { stopSeq(i, env, now, "guard"); return false; }
+          r.step++;  // a false guard skips the step
+          return true;
+        }
+        stepAction(env, q.id, s.act, now);
+        r.step++;
+        return true;
+      case StepType::Wait:
+        r.step++;
+        r.resumeAt = now + s.secs * 1000UL;
+        return false;
+      case StepType::Until:
+        if (condNow(s.cond, env, ci, haveClock)) { r.inUntil = false; r.step++; return true; }
+        if (!r.inUntil) { r.inUntil = true; r.deadline = now + s.secs * 1000UL; return false; }
+        if (int32_t(now - r.deadline) >= 0) {
+          r.inUntil = false;
+          log(env, now, q.id, EvKind::Failed, "timeout");
+          if (s.stopOnTimeout) { stopSeq(i, env, now, "timeout"); return false; }
+          r.step++;
+          return true;
+        }
+        return false;
+      default:
+        r.step++;
+        return true;
+    }
+  }
+
+  void tickSeqs(AutoEnv& env, uint32_t now, const ClockInfo& ci, bool haveClock) {
+    for (size_t i = 0; i < nSeq_; i++)
+      for (int k = 0; k < kStepsPerPass && sr_[i].st == SeqRunState::Running; k++)
+        if (!stepSeq(i, env, now, ci, haveClock)) break;
   }
 };
 

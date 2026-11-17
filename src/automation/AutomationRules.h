@@ -16,12 +16,16 @@ constexpr size_t kMaxRules = 16;
 constexpr size_t kMaxConds = 3;
 constexpr size_t kMaxActions = 4;
 constexpr size_t kMaxInterlocks = 4;
+constexpr size_t kMaxSeqs = 4;          // sequences
+constexpr size_t kMaxSteps = 16;        // steps in one sequence
+constexpr size_t kMaxStepsTotal = 32;   // steps in all sequences together (about 80 bytes each)
+constexpr size_t kMaxTimers = 6;
 constexpr unsigned kRuleNameCap = 25;  // 24 chars + NUL
 constexpr unsigned kActTextCap = 16;   // 15 chars + NUL: an event name or a short serial line
 
-enum class TrigType : uint8_t { Change, When, Interval, Schedule, Startup, Wifi, Manual, kCount };
+enum class TrigType : uint8_t { Change, When, Interval, Schedule, Startup, Wifi, Manual, Timer, Sequence, kCount };
 inline const char* trigName(TrigType t) {
-  static const char* const n[] = {"change", "when", "interval", "schedule", "startup", "wifi", "manual"};
+  static const char* const n[] = {"change", "when", "interval", "schedule", "startup", "wifi", "manual", "timer", "sequence"};
   return uint8_t(t) < uint8_t(TrigType::kCount) ? n[uint8_t(t)] : "";
 }
 inline bool parseTrig(const char* s, TrigType& out) {
@@ -54,9 +58,9 @@ inline bool compare(Op o, double a, double b) {
   }
 }
 
-enum class ActType : uint8_t { On, Off, Toggle, Set, Stop, Send, Event, kCount };
+enum class ActType : uint8_t { On, Off, Toggle, Set, Stop, Send, Event, SeqStart, SeqStop, TimerStart, TimerStop, kCount };
 inline const char* actName(ActType t) {
-  static const char* const n[] = {"on", "off", "toggle", "set", "stop", "send", "event"};
+  static const char* const n[] = {"on", "off", "toggle", "set", "stop", "send", "event", "seq_start", "seq_stop", "timer_start", "timer_stop"};
   return uint8_t(t) < uint8_t(ActType::kCount) ? n[uint8_t(t)] : "";
 }
 inline bool parseAct(const char* s, ActType& out) {
@@ -76,6 +80,7 @@ struct Trigger {
   uint16_t minute = 0;        // schedule: minute of the day
   uint8_t days = 0x7F;        // schedule: bit 0 = Sunday, bit 6 = Saturday
   bool wifiUp = true;         // wifi: true = when it connects, false = when it drops
+  bool onStopped = false;     // sequence: false = when it finishes, true = when it is stopped early
 };
 
 struct Cond {
@@ -123,7 +128,7 @@ struct AutoSettings {
 
 enum class AutoErr : uint8_t {
   Ok = 0, Format, Id, Duplicate, Name, Trigger, Device, Prop, Op, Value, Time, Days, Conds, Actions, Action,
-  Cooldown, Duration, TooMany, Interlock, Offset, NotFound, Busy
+  Cooldown, Duration, TooMany, Interlock, Offset, NotFound, Busy, Steps, Loop, Timer, Target
 };
 
 inline const char* autoErrCode(AutoErr e) {
@@ -150,6 +155,10 @@ inline const char* autoErrCode(AutoErr e) {
     case AutoErr::Offset: return "bad_offset";
     case AutoErr::NotFound: return "not_found";
     case AutoErr::Busy: return "busy";
+    case AutoErr::Steps: return "bad_steps";
+    case AutoErr::Loop: return "bad_loop";
+    case AutoErr::Timer: return "bad_timer";
+    case AutoErr::Target: return "unknown_target";
   }
   return "";
 }
@@ -171,9 +180,64 @@ inline const char* autoErrField(AutoErr e) {
     case AutoErr::Duration: return "for_s";
     case AutoErr::Interlock: return "interlocks";
     case AutoErr::Offset: return "utc_offset_min";
+    case AutoErr::Steps: return "steps";
+    case AutoErr::Loop: return "repeat";
+    case AutoErr::Timer: return "duration_s";
+    case AutoErr::Target: return "device";
     default: return "";
   }
 }
+
+// ---- sequences and timers ------------------------------------------------------------------------
+
+enum class StepType : uint8_t { Do, Wait, Until, kCount };
+inline const char* stepName(StepType t) {
+  static const char* const n[] = {"do", "wait", "until"};
+  return uint8_t(t) < uint8_t(StepType::kCount) ? n[uint8_t(t)] : "";
+}
+inline bool parseStep(const char* s, StepType& out) {
+  if (!s) return false;
+  for (uint8_t i = 0; i < uint8_t(StepType::kCount); i++)
+    if (!strcmp(s, stepName(StepType(i)))) { out = StepType(i); return true; }
+  return false;
+}
+
+// One step of a sequence.
+//   do:    run `act`; with a guard, only if `cond` holds (otherwise skip the step, or stop the sequence)
+//   wait:  pause for `secs` seconds
+//   until: wait for `cond` to hold, at most `secs` seconds; on timeout carry on, or stop the sequence
+struct Step {
+  StepType type = StepType::Do;
+  uint32_t secs = 0;
+  bool hasGuard = false;
+  bool stopOnFalse = false;    // do with a guard: a false guard stops the sequence (false = skip the step)
+  bool stopOnTimeout = false;  // until: timing out stops the sequence (false = carry on)
+  Cond cond;
+  Action act;
+};
+
+// A whole sequence as it travels through the API (the engine keeps its steps in an exactly sized array).
+struct SeqDef {
+  char id[kIdCap] = {0};
+  char name[kRuleNameCap] = {0};
+  uint8_t repeat = 1;  // passes through the steps; 0 = until stopped
+  uint8_t nSteps = 0;
+  Step steps[kMaxSteps];
+};
+
+struct TimerDef {
+  char id[kIdCap] = {0};
+  char name[kRuleNameCap] = {0};
+  uint32_t durationS = 60;
+  bool repeat = false;  // start again by itself when it finishes
+};
+
+// Which sequences and timers exist (rules and dashboards refer to them by id).
+struct AutoRefs {
+  bool (*hasSeq)(void*, const char*) = nullptr;
+  bool (*hasTimer)(void*, const char*) = nullptr;
+  void* ctx = nullptr;
+};
 
 // ---- helpers -------------------------------------------------------------------------------------
 
@@ -246,9 +310,15 @@ inline AutoErr validateCond(const Cond& c, DeviceLookup find, void* ctx, bool wh
   return AutoErr::Ok;
 }
 
-inline AutoErr validateAction(const Action& a, DeviceLookup find, void* ctx) {
+inline AutoErr validateAction(const Action& a, DeviceLookup find, void* ctx, const AutoRefs* refs = nullptr) {
   if (uint8_t(a.type) >= uint8_t(ActType::kCount)) return AutoErr::Action;
   if (a.type == ActType::Event) return textOk(a.text, kActTextCap, false) ? AutoErr::Ok : AutoErr::Value;
+  if (a.type == ActType::SeqStart || a.type == ActType::SeqStop || a.type == ActType::TimerStart || a.type == ActType::TimerStop) {
+    if (!refs || !textOk(a.device, kIdCap, false)) return AutoErr::Target;
+    bool seq = a.type == ActType::SeqStart || a.type == ActType::SeqStop;
+    bool ok = seq ? (refs->hasSeq && refs->hasSeq(refs->ctx, a.device)) : (refs->hasTimer && refs->hasTimer(refs->ctx, a.device));
+    return ok ? AutoErr::Ok : AutoErr::Target;
+  }
   DeviceConfig d;
   if (!textOk(a.device, kIdCap, false) || !find(ctx, a.device, d)) return AutoErr::Device;
   if (a.type == ActType::Send && !textOk(a.text, kActTextCap, false)) return AutoErr::Value;
@@ -257,7 +327,7 @@ inline AutoErr validateAction(const Action& a, DeviceLookup find, void* ctx) {
   return buildCommand(a, d.type, c) ? AutoErr::Ok : AutoErr::Action;
 }
 
-inline AutoErr validateTrigger(const Trigger& t, size_t nConds, DeviceLookup find, void* ctx) {
+inline AutoErr validateTrigger(const Trigger& t, size_t nConds, DeviceLookup find, void* ctx, const AutoRefs* refs = nullptr) {
   switch (t.type) {
     case TrigType::Change: {
       DeviceConfig d;
@@ -271,6 +341,12 @@ inline AutoErr validateTrigger(const Trigger& t, size_t nConds, DeviceLookup fin
     case TrigType::Schedule:
       if (t.minute > 1439) return AutoErr::Time;
       return ((t.days & 0x7F) && !(t.days & 0x80)) ? AutoErr::Ok : AutoErr::Days;
+    case TrigType::Timer:
+    case TrigType::Sequence: {
+      if (!refs || !textOk(t.device, kIdCap, false)) return AutoErr::Target;
+      bool ok = t.type == TrigType::Timer ? (refs->hasTimer && refs->hasTimer(refs->ctx, t.device)) : (refs->hasSeq && refs->hasSeq(refs->ctx, t.device));
+      return ok ? AutoErr::Ok : AutoErr::Target;
+    }
     case TrigType::Startup:
     case TrigType::Wifi:
     case TrigType::Manual: return AutoErr::Ok;
@@ -279,23 +355,63 @@ inline AutoErr validateTrigger(const Trigger& t, size_t nConds, DeviceLookup fin
 }
 
 // Everything about one rule except "is its id already taken" (the engine checks that).
-inline AutoErr validateRule(const Rule& r, DeviceLookup find, void* ctx) {
+inline AutoErr validateRule(const Rule& r, DeviceLookup find, void* ctx, const AutoRefs* refs = nullptr) {
   if (!textOk(r.id, kIdCap, false) || !detail::validDeviceId(r.id)) return AutoErr::Id;
   if (!textOk(r.name, kRuleNameCap, true)) return AutoErr::Name;
   if (uint8_t(r.trig.type) >= uint8_t(TrigType::kCount)) return AutoErr::Trigger;
   if (r.nConds > kMaxConds) return AutoErr::Conds;
   if (r.nActs < 1 || r.nActs > kMaxActions) return AutoErr::Actions;
   if (r.cooldownS > 86400) return AutoErr::Cooldown;
-  AutoErr e = validateTrigger(r.trig, r.nConds, find, ctx);
+  AutoErr e = validateTrigger(r.trig, r.nConds, find, ctx, refs);
   if (e != AutoErr::Ok) return e;
   for (size_t i = 0; i < r.nConds; i++) {
     e = validateCond(r.conds[i], find, ctx, r.trig.type == TrigType::When);
     if (e != AutoErr::Ok) return e;
   }
   for (size_t i = 0; i < r.nActs; i++) {
-    e = validateAction(r.acts[i], find, ctx);
+    e = validateAction(r.acts[i], find, ctx, refs);
     if (e != AutoErr::Ok) return e;
   }
+  return AutoErr::Ok;
+}
+
+// One step. Sequences cannot start or stop sequences (no recursion); timers and devices are fine.
+inline AutoErr validateStep(const Step& st, DeviceLookup find, void* ctx, const AutoRefs* refs) {
+  switch (st.type) {
+    case StepType::Do: {
+      if (st.act.type == ActType::SeqStart || st.act.type == ActType::SeqStop) return AutoErr::Action;
+      AutoErr e = validateAction(st.act, find, ctx, refs);
+      if (e != AutoErr::Ok) return e;
+      return st.hasGuard ? validateCond(st.cond, find, ctx, false) : AutoErr::Ok;
+    }
+    case StepType::Wait: return (st.secs >= 1 && st.secs <= 86400) ? AutoErr::Ok : AutoErr::Time;
+    case StepType::Until: {
+      if (st.secs < 1 || st.secs > 86400) return AutoErr::Time;
+      return validateCond(st.cond, find, ctx, false);
+    }
+    default: return AutoErr::Steps;
+  }
+}
+
+// A sequence: 1-16 steps, and one that repeats must wait somewhere in its steps (or it would spin).
+inline AutoErr validateSeq(const SeqDef& q, DeviceLookup find, void* ctx, const AutoRefs* refs) {
+  if (!textOk(q.id, kIdCap, false) || !detail::validDeviceId(q.id)) return AutoErr::Id;
+  if (!textOk(q.name, kRuleNameCap, true)) return AutoErr::Name;
+  if (q.nSteps < 1 || q.nSteps > kMaxSteps) return AutoErr::Steps;
+  bool waits = false;
+  for (size_t i = 0; i < q.nSteps; i++) {
+    AutoErr e = validateStep(q.steps[i], find, ctx, refs);
+    if (e != AutoErr::Ok) return e;
+    if (q.steps[i].type != StepType::Do) waits = true;
+  }
+  if (q.repeat != 1 && !waits) return AutoErr::Loop;
+  return AutoErr::Ok;
+}
+
+inline AutoErr validateTimer(const TimerDef& t) {
+  if (!textOk(t.id, kIdCap, false) || !detail::validDeviceId(t.id)) return AutoErr::Id;
+  if (!textOk(t.name, kRuleNameCap, true)) return AutoErr::Name;
+  if (t.durationS < 1 || t.durationS > 86400) return AutoErr::Timer;
   return AutoErr::Ok;
 }
 

@@ -6,6 +6,8 @@
 #include "DashboardRules.h"
 #include "devices/DeviceRegistry.h"
 
+namespace espwf { class AutomationEngine; }
+
 namespace espwf {
 namespace DashboardStore {
 
@@ -19,7 +21,7 @@ struct Result {
 DashErr parseComponent(JsonVariantConst src, DashComp& out);
 
 // Validates a whole dashboard document against the registered devices.
-Result validate(JsonVariantConst doc, DeviceRegistry& devices);
+Result validate(JsonVariantConst doc, DeviceRegistry& devices, AutomationEngine* automation);
 
 // Writes the document (temp file, then rename; the old file becomes dashboard.json.bak).
 bool save(JsonVariantConst doc);

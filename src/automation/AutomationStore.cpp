@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <LittleFS.h>
+#include <new>
 
 #include "config/ConfigRules.h"
 
@@ -64,6 +65,69 @@ static void daysToJson(uint8_t mask, JsonArray out) {
     if (mask & (1u << d)) out.add(d);
 }
 
+// ---- conditions and actions (shared by rules and sequence steps) ----------------------------------------
+
+static AutoErr parseCond(JsonVariantConst c, Cond& k) {
+  if (!c.is<JsonObjectConst>()) return AutoErr::Conds;
+  k = Cond();
+  const char* kind = c["type"].is<const char*>() ? c["type"].as<const char*>() : "compare";
+  if (!strcmp(kind, "time")) {
+    k.kind = CondKind::Time;
+    bool a, b;
+    if (!parseHm(c["from"], k.from, a) || !parseHm(c["to"], k.to, b) || !a || !b) return AutoErr::Time;
+    if (!parseDays(c["days"], k.days)) return AutoErr::Days;
+    return AutoErr::Ok;
+  }
+  if (strcmp(kind, "compare")) return AutoErr::Conds;
+  if (!getStr(c["device"], k.device, kIdCap)) return AutoErr::Device;
+  if (!c["property"].is<const char*>() || !parseProp(c["property"].as<const char*>(), k.prop)) return AutoErr::Prop;
+  if (!c["operator"].is<const char*>() || !parseOp(c["operator"].as<const char*>(), k.op)) return AutoErr::Op;
+  if (!c["value"].is<double>()) return AutoErr::Value;
+  k.value = c["value"].as<float>();
+  long n = 0;
+  if (!getInt(c["for_s"], 0, 1000000, n)) return AutoErr::Duration;
+  k.forS = uint32_t(n);
+  return AutoErr::Ok;
+}
+
+static void condToJson(const Cond& c, JsonObject o) {
+  char b[6];
+  if (c.kind == CondKind::Time) {
+    o["type"] = "time";
+    hm(c.from, b); o["from"] = b;
+    hm(c.to, b); o["to"] = b;
+    daysToJson(c.days, o["days"].to<JsonArray>());
+    return;
+  }
+  o["device"] = c.device;
+  o["property"] = propName(c.prop);
+  o["operator"] = opName(c.op);
+  o["value"] = c.value;
+  if (c.forS) o["for_s"] = c.forS;
+}
+
+static AutoErr parseAction(JsonVariantConst a, Action& k) {
+  if (!a.is<JsonObjectConst>()) return AutoErr::Action;
+  k = Action();
+  if (!a["type"].is<const char*>() || !parseAct(a["type"].as<const char*>(), k.type)) return AutoErr::Action;
+  if (!getStr(a["device"], k.device, kIdCap)) return AutoErr::Device;
+  if (!getStr(a["text"], k.text, kActTextCap)) return AutoErr::Value;
+  if (!a["value"].isNull()) {
+    if (!a["value"].is<double>() || a["value"].is<bool>()) return AutoErr::Value;
+    k.value = a["value"].as<float>();
+  }
+  return AutoErr::Ok;
+}
+
+static void actionToJson(const Action& a, JsonObject o) {
+  o["type"] = actName(a.type);
+  if (a.type != ActType::Event) o["device"] = a.device;  // for seq_* and timer_* actions it names the sequence or timer
+  if (a.type == ActType::Set) o["value"] = a.value;
+  if (a.type == ActType::Send || a.type == ActType::Event) o["text"] = a.text;
+}
+
+// ---- rules ---------------------------------------------------------------------------------------------
+
 AutoErr parseRule(JsonVariantConst src, Rule& r) {
   if (!src.is<JsonObjectConst>()) return AutoErr::Format;
   if (!getStr(src["id"], r.id, kIdCap)) return AutoErr::Id;
@@ -102,6 +166,8 @@ AutoErr parseRule(JsonVariantConst src, Rule& r) {
     const char* e = t["event"].as<const char*>();
     if (!strcmp(e, "connected")) r.trig.wifiUp = true;
     else if (!strcmp(e, "disconnected")) r.trig.wifiUp = false;
+    else if (!strcmp(e, "done")) r.trig.onStopped = false;
+    else if (!strcmp(e, "stopped")) r.trig.onStopped = true;
     else return AutoErr::Trigger;
   }
 
@@ -110,27 +176,8 @@ AutoErr parseRule(JsonVariantConst src, Rule& r) {
     if (!conds.is<JsonArrayConst>() || conds.size() > kMaxConds) return AutoErr::Conds;
     r.nConds = 0;
     for (JsonVariantConst c : conds.as<JsonArrayConst>()) {
-      if (!c.is<JsonObjectConst>()) return AutoErr::Conds;
-      Cond& k = r.conds[r.nConds++];
-      k = Cond();
-      const char* kind = c["type"].is<const char*>() ? c["type"].as<const char*>() : "compare";
-      if (!strcmp(kind, "time")) {
-        k.kind = CondKind::Time;
-        bool a, b;
-        if (!parseHm(c["from"], k.from, a) || !parseHm(c["to"], k.to, b) || !a || !b) return AutoErr::Time;
-        if (!parseDays(c["days"], k.days)) return AutoErr::Days;
-      } else if (!strcmp(kind, "compare")) {
-        if (!getStr(c["device"], k.device, kIdCap)) return AutoErr::Device;
-        if (!c["property"].is<const char*>() || !parseProp(c["property"].as<const char*>(), k.prop)) return AutoErr::Prop;
-        if (!c["operator"].is<const char*>() || !parseOp(c["operator"].as<const char*>(), k.op)) return AutoErr::Op;
-        if (!c["value"].is<double>()) return AutoErr::Value;
-        k.value = c["value"].as<float>();
-        n = 0;
-        if (!getInt(c["for_s"], 0, 1000000, n)) return AutoErr::Duration;
-        k.forS = uint32_t(n);
-      } else {
-        return AutoErr::Conds;
-      }
+      AutoErr e = parseCond(c, r.conds[r.nConds++]);
+      if (e != AutoErr::Ok) return e;
     }
   }
 
@@ -139,16 +186,8 @@ AutoErr parseRule(JsonVariantConst src, Rule& r) {
     if (!acts.is<JsonArrayConst>() || acts.size() > kMaxActions) return AutoErr::Actions;
     r.nActs = 0;
     for (JsonVariantConst a : acts.as<JsonArrayConst>()) {
-      if (!a.is<JsonObjectConst>()) return AutoErr::Actions;
-      Action& k = r.acts[r.nActs++];
-      k = Action();
-      if (!a["type"].is<const char*>() || !parseAct(a["type"].as<const char*>(), k.type)) return AutoErr::Action;
-      if (!getStr(a["device"], k.device, kIdCap)) return AutoErr::Device;
-      if (!getStr(a["text"], k.text, kActTextCap)) return AutoErr::Value;
-      if (!a["value"].isNull()) {
-        if (!a["value"].is<double>() || a["value"].is<bool>()) return AutoErr::Value;
-        k.value = a["value"].as<float>();
-      }
+      AutoErr e = parseAction(a, r.acts[r.nActs++]);
+      if (e != AutoErr::Ok) return e;
     }
   }
   return AutoErr::Ok;
@@ -166,37 +205,132 @@ void ruleToJson(const Rule& r, JsonObject out) {
     case TrigType::Interval: t["every_s"] = r.trig.everyS; break;
     case TrigType::Schedule: hm(r.trig.minute, b); t["time"] = b; daysToJson(r.trig.days, t["days"].to<JsonArray>()); break;
     case TrigType::Wifi: t["event"] = r.trig.wifiUp ? "connected" : "disconnected"; break;
+    case TrigType::Timer: t["device"] = r.trig.device; break;
+    case TrigType::Sequence: t["device"] = r.trig.device; t["event"] = r.trig.onStopped ? "stopped" : "done"; break;
     default: break;
   }
   out["match"] = r.matchAny ? "any" : "all";
   JsonArray conds = out["conditions"].to<JsonArray>();
-  for (size_t i = 0; i < r.nConds; i++) {
-    const Cond& c = r.conds[i];
-    JsonObject o = conds.add<JsonObject>();
-    if (c.kind == CondKind::Time) {
-      o["type"] = "time";
-      hm(c.from, b); o["from"] = b;
-      hm(c.to, b); o["to"] = b;
-      daysToJson(c.days, o["days"].to<JsonArray>());
-    } else {
-      o["device"] = c.device;
-      o["property"] = propName(c.prop);
-      o["operator"] = opName(c.op);
-      o["value"] = c.value;
-      if (c.forS) o["for_s"] = c.forS;
-    }
-  }
+  for (size_t i = 0; i < r.nConds; i++) condToJson(r.conds[i], conds.add<JsonObject>());
   JsonArray acts = out["actions"].to<JsonArray>();
-  for (size_t i = 0; i < r.nActs; i++) {
-    const Action& a = r.acts[i];
-    JsonObject o = acts.add<JsonObject>();
-    o["type"] = actName(a.type);
-    if (a.type != ActType::Event) o["device"] = a.device;
-    if (a.type == ActType::Set) o["value"] = a.value;
-    if (a.type == ActType::Send || a.type == ActType::Event) o["text"] = a.text;
-  }
+  for (size_t i = 0; i < r.nActs; i++) actionToJson(r.acts[i], acts.add<JsonObject>());
   out["cooldown_s"] = r.cooldownS;
 }
+
+// ---- sequences and timers ------------------------------------------------------------------------------
+
+static AutoErr parseStepJson(JsonVariantConst src, Step& st) {
+  if (!src.is<JsonObjectConst>()) return AutoErr::Steps;
+  st = Step();
+  if (!src["type"].is<const char*>() || !parseStep(src["type"].as<const char*>(), st.type)) return AutoErr::Steps;
+  long n = 0;
+  switch (st.type) {
+    case StepType::Do: {
+      AutoErr e = parseAction(src["action"], st.act);
+      if (e != AutoErr::Ok) return e;
+      if (!src["guard"].isNull()) {
+        st.hasGuard = true;
+        e = parseCond(src["guard"], st.cond);
+        if (e != AutoErr::Ok) return e;
+      }
+      if (!src["else"].isNull()) {
+        if (!src["else"].is<const char*>()) return AutoErr::Steps;
+        const char* v = src["else"].as<const char*>();
+        if (!strcmp(v, "stop")) st.stopOnFalse = true;
+        else if (strcmp(v, "skip")) return AutoErr::Steps;
+      }
+      return AutoErr::Ok;
+    }
+    case StepType::Wait:
+      if (!getInt(src["seconds"], 0, 1000000, n)) return AutoErr::Time;
+      st.secs = uint32_t(n);
+      return AutoErr::Ok;
+    case StepType::Until: {
+      AutoErr e = parseCond(src["condition"], st.cond);
+      if (e != AutoErr::Ok) return e;
+      if (!getInt(src["timeout_s"], 0, 1000000, n)) return AutoErr::Time;
+      st.secs = uint32_t(n);
+      if (!src["on_timeout"].isNull()) {
+        if (!src["on_timeout"].is<const char*>()) return AutoErr::Steps;
+        const char* v = src["on_timeout"].as<const char*>();
+        if (!strcmp(v, "stop")) st.stopOnTimeout = true;
+        else if (strcmp(v, "continue")) return AutoErr::Steps;
+      }
+      return AutoErr::Ok;
+    }
+    default: return AutoErr::Steps;
+  }
+}
+
+static void stepToJson(const Step& st, JsonObject o) {
+  o["type"] = stepName(st.type);
+  switch (st.type) {
+    case StepType::Do:
+      actionToJson(st.act, o["action"].to<JsonObject>());
+      if (st.hasGuard) {
+        condToJson(st.cond, o["guard"].to<JsonObject>());
+        o["else"] = st.stopOnFalse ? "stop" : "skip";
+      }
+      break;
+    case StepType::Wait: o["seconds"] = st.secs; break;
+    case StepType::Until:
+      condToJson(st.cond, o["condition"].to<JsonObject>());
+      o["timeout_s"] = st.secs;
+      o["on_timeout"] = st.stopOnTimeout ? "stop" : "continue";
+      break;
+    default: break;
+  }
+}
+
+AutoErr parseSeq(JsonVariantConst src, SeqDef& q) {
+  if (!src.is<JsonObjectConst>()) return AutoErr::Format;
+  if (!getStr(src["id"], q.id, kIdCap)) return AutoErr::Id;
+  if (!getStr(src["name"], q.name, kRuleNameCap)) return AutoErr::Name;
+  long n = q.repeat;
+  if (!getInt(src["repeat"], 0, 255, n)) return AutoErr::Loop;
+  q.repeat = uint8_t(n);
+  JsonVariantConst steps = src["steps"];
+  if (!steps.isNull()) {
+    if (!steps.is<JsonArrayConst>() || steps.size() > kMaxSteps) return AutoErr::Steps;
+    q.nSteps = 0;
+    for (JsonVariantConst s : steps.as<JsonArrayConst>()) {
+      AutoErr e = parseStepJson(s, q.steps[q.nSteps++]);
+      if (e != AutoErr::Ok) return e;
+    }
+  }
+  return AutoErr::Ok;
+}
+
+void seqToJson(const SeqDef& q, JsonObject out) {
+  out["id"] = q.id;
+  out["name"] = q.name;
+  out["repeat"] = q.repeat;
+  JsonArray steps = out["steps"].to<JsonArray>();
+  for (size_t i = 0; i < q.nSteps; i++) stepToJson(q.steps[i], steps.add<JsonObject>());
+}
+
+AutoErr parseTimer(JsonVariantConst src, TimerDef& t) {
+  if (!src.is<JsonObjectConst>()) return AutoErr::Format;
+  if (!getStr(src["id"], t.id, kIdCap)) return AutoErr::Id;
+  if (!getStr(src["name"], t.name, kRuleNameCap)) return AutoErr::Name;
+  long n = long(t.durationS);
+  if (!getInt(src["duration_s"], 0, 1000000, n)) return AutoErr::Timer;
+  t.durationS = uint32_t(n);
+  if (!src["repeat"].isNull()) {
+    if (!src["repeat"].is<bool>()) return AutoErr::Timer;
+    t.repeat = src["repeat"].as<bool>();
+  }
+  return AutoErr::Ok;
+}
+
+void timerToJson(const TimerDef& t, JsonObject out) {
+  out["id"] = t.id;
+  out["name"] = t.name;
+  out["duration_s"] = t.durationS;
+  out["repeat"] = t.repeat;
+}
+
+// ---- settings ------------------------------------------------------------------------------------------
 
 AutoErr parseSettings(JsonVariantConst src, AutoSettings& s) {
   if (!src.is<JsonObjectConst>()) return AutoErr::Format;
@@ -235,6 +369,8 @@ void settingsToJson(const AutoSettings& s, JsonObject out) {
   }
 }
 
+// ---- the file ------------------------------------------------------------------------------------------
+
 static bool readFile(const char* path, AutomationCore& core, size_t& loaded) {
   File f = LittleFS.open(path, "r");
   if (!f) return false;
@@ -249,6 +385,21 @@ static bool readFile(const char* path, AutomationCore& core, size_t& loaded) {
   AutoSettings s;
   if (parseSettings(doc, s) == AutoErr::Ok) core.settings = s;
   loaded = 0;
+  for (JsonVariantConst item : doc["timers"].as<JsonArrayConst>()) {
+    TimerDef t;
+    AutoErr err = parseTimer(item, t);
+    if (err == AutoErr::Ok) err = core.addTimer(t);
+    if (err != AutoErr::Ok) Serial.printf("[auto] skipped saved timer '%s': %s\n", t.id, autoErrCode(err));
+  }
+  SeqDef* q = new (std::nothrow) SeqDef;  // about 1.5 KB: on the heap, one at a time
+  for (JsonVariantConst item : doc["sequences"].as<JsonArrayConst>()) {
+    if (!q) break;
+    *q = SeqDef();
+    AutoErr err = parseSeq(item, *q);
+    if (err == AutoErr::Ok) err = core.addSeq(*q);
+    if (err != AutoErr::Ok) Serial.printf("[auto] skipped saved sequence '%s': %s\n", q->id, autoErrCode(err));
+  }
+  delete q;
   for (JsonVariantConst item : doc["rules"].as<JsonArrayConst>()) {
     Rule r;
     AutoErr err = parseRule(item, r);
@@ -276,7 +427,7 @@ bool save(const AutoSettings& s, const AutomationCore& core) {
     d["schema_version"] = kConfigSchema;
     String head;
     serializeJson(d, head);
-    head.remove(head.length() - 1);  // drop the closing brace: the rules array follows
+    head.remove(head.length() - 1);  // drop the closing brace: the arrays follow
     f.print(head);
     f.print(",\"rules\":[");
   }
@@ -286,6 +437,23 @@ bool save(const AutoSettings& s, const AutomationCore& core) {
     if (i) f.print(',');
     serializeJson(d, f);
   }
+  f.print("],\"timers\":[");
+  for (size_t i = 0; i < core.timerCount(); i++) {
+    JsonDocument d;
+    timerToJson(core.timer(i), d.to<JsonObject>());
+    if (i) f.print(',');
+    serializeJson(d, f);
+  }
+  f.print("],\"sequences\":[");
+  SeqDef* q = new (std::nothrow) SeqDef;
+  for (size_t i = 0; q && i < core.seqCount(); i++) {
+    core.seqDef(i, *q);
+    JsonDocument d;
+    seqToJson(*q, d.to<JsonObject>());
+    if (i) f.print(',');
+    serializeJson(d, f);
+  }
+  delete q;
   f.print("]}");
   f.close();
   LittleFS.remove(kBak);

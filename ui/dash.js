@@ -8,6 +8,7 @@ let dschema = null;
 let draft = null;        // working copy while editing
 let dEditing = false, previewing = false;
 let curTab = 0, editId = null, joyActive = false;
+let dtimers = [];       // automation timers, for the Timer component
 const hist = {};         // "device:prop" -> { t, a: [recent values] } for graphs
 const GRAPH_POINTS = 60;
 const MAX_BODY = 6000;   // the board refuses more than 6 KB
@@ -16,7 +17,7 @@ const clone = (x) => JSON.parse(JSON.stringify(x));
 const dev = (id) => devices.find((d) => d.id === id);
 const typeInfo = (name) => (dschema ? dschema.types.find((t) => t.name === name) : null);
 
-const NAMES = { toggle: "Toggle", push_button: "Push button", slider: "Slider", joystick: "Joystick", gauge: "Gauge", numeric: "Number display", status: "Status light", graph: "Graph", text: "Text display", dropdown: "Dropdown", progress: "Progress bar", device_card: "Device card", group_panel: "Group panel" };
+const NAMES = { toggle: "Toggle", push_button: "Push button", slider: "Slider", joystick: "Joystick", gauge: "Gauge", numeric: "Number display", status: "Status light", graph: "Graph", text: "Text display", dropdown: "Dropdown", progress: "Progress bar", device_card: "Device card", group_panel: "Group panel", timer: "Timer" };
 const PROPNAMES = { state: "on / off", level: "level", temp_c: "temperature", humidity: "humidity", pressure_hpa: "pressure", text: "text", count: "count", ok: "reading ok" };
 const UNITS = { temp_c: " °C", humidity: " %", pressure_hpa: " hPa" };
 
@@ -149,8 +150,34 @@ function missing(c, what) {
   return el("div", { className: "dc bad" }, el("strong", { textContent: c.label || c.id }), el("small", { textContent: "needs " + what + " (removed?)" }));
 }
 
+function mmss(s) { return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); }
+
+function renderTimerComp(c, box) {
+  const t = dtimers.find((x) => x.id === (c.binding || {}).device);
+  if (!t) return Object.assign(missing(c, "timer '" + (c.binding || {}).device + "'"), { style: box.style.cssText });
+  box.append(el("h3", { textContent: c.label || t.name || t.id }));
+  box.append(el("p", { className: "big", textContent: t.running ? mmss(t.remaining_s) : mmss(t.duration_s) }));
+  const bar = el("div", { className: "bar" }, el("i"));
+  bar.firstChild.style.width = (t.running && t.duration_s ? Math.max(0, Math.min(100, (t.remaining_s / t.duration_s) * 100)) : 0) + "%";
+  const go = el("button", { type: "button", className: "tgl" + (t.running ? " on" : ""), textContent: t.running ? "Stop" : "Start" });
+  go.onclick = () => api("/automation/timers/" + (t.running ? "stop" : "start") + "?id=" + t.id, { method: "POST" }).then(() => setTimeout(fetchTimers, 400)).catch(() => {});
+  box.append(bar, go);
+  return box;
+}
+
+async function fetchTimers() {
+  try { dtimers = (await api("/automation/timers")).timers; dashRender(); } catch (e) { /* offline */ }
+}
+
 function renderComp(c) {
   const b = c.binding || {};
+  if (c.type === "timer") {
+    const tb = el("div", { className: "dc" });
+    tb.style.gridColumn = c.layout.column + " / span " + c.layout.width;
+    tb.style.gridRow = c.layout.row + " / span " + c.layout.height;
+    tb.style.setProperty("--h", c.layout.height);
+    return renderTimerComp(c, tb);
+  }
   const d = dev(b.device);
   const title = c.label || (d && d.name) || c.id;
   const box = el("div", { className: "dc" });
@@ -361,6 +388,7 @@ function nextId() {
 function writes(ti) { return ti.need.startsWith("write"); }
 
 function devicesFor(ti) {
+  if (ti.need === "timer") return dtimers.map((t) => ({ id: t.id, name: t.name || t.id, props: [], type: "timer" }));
   return devices.filter((d) => {
     if (ti.need === "card" || ti.need === "devices") return true;
     if (ti.need === "action") return d.props.some((p) => p.write) || d.type === "serial";
@@ -433,12 +461,12 @@ function buildFromForm() {
   const c = { id: editId || nextId(), type: t, label: f.clabel.value.slice(0, 24), tab: curTab, layout: { column: 1, row: 1, width: 1, height: 1 }, binding: {} };
   const old = editId && draft.components.find((x) => x.id === editId);
   if (old) { c.layout = clone(old.layout); c.tab = old.tab || 0; }
-  else { if (t === "slider" || t === "graph" || t === "dropdown") c.layout.width = 2; if (t === "joystick" || t === "group_panel") { c.layout.width = 2; c.layout.height = 2; } if (t === "device_card") { c.layout.width = 2; c.layout.height = 2; } }
+  else { if (t === "slider" || t === "graph" || t === "dropdown") c.layout.width = 2; if (t === "joystick" || t === "group_panel") { c.layout.width = 2; c.layout.height = 2; } if (t === "device_card") { c.layout.width = 2; c.layout.height = 2; } if (t === "timer") c.layout.width = 2; }
   if (ti.need === "devices") {
     c.binding.devices = [...$("cgroup").querySelectorAll("input:checked")].map((i) => i.value);
     if (!c.binding.devices.length) return "Pick at least one device.";
   } else {
-    if (!f.cdev.value) return "Pick a device.";
+    if (!f.cdev.value) return ti.need === "timer" ? "Pick a timer (create one on the Automation tab first)." : "Pick a device.";
     c.binding.device = f.cdev.value;
   }
   if (["write_state", "write_level", "read_number", "read_state", "read_text"].includes(ti.need)) {
@@ -499,6 +527,7 @@ async function saveDash(doc) {
 function startEditing() {
   draft = clone(dash);
   draft.mode = "manual";
+  fetchTimers();
   dEditing = true; previewing = false; editId = null;
   dashRender();
 }
@@ -508,6 +537,7 @@ $("dmmanual").onclick = async () => {
   if (!dash.components.length) {  // nothing yet: start from the automatic layout
     draft = { schema_version: 1, mode: "manual", tabs: [], components: autoLayout().map((c, i) => Object.assign(c, { id: "c" + (i + 1) })) };
     dEditing = true; previewing = false; editId = null; curTab = 0;
+    fetchTimers();
     dashRender();
     return;
   }
@@ -545,10 +575,18 @@ async function dashShow() {
     const d = await api("/dashboard");
     d.tabs = d.tabs || []; d.components = d.components || [];
     if (!dEditing) dash = d;
+    if ((dEditing ? draft : d).components.some((c) => c.type === "timer") || dEditing) await fetchTimers();
   } catch (e) { /* the offline dot shows it */ }
   if (!wsLive) await fetchDevices();
   dashRender();
 }
+// Timers are read from the board once a second while a Timer component is on screen.
+setInterval(() => {
+  if ($("dash").hidden) return;
+  const list = dEditing ? draft.components : dash.components;
+  if (list.some((c) => c.type === "timer")) fetchTimers();
+}, 1000);
+
 // Without a WebSocket the device list is polled (the Devices tab does the same); with one, events keep it current.
 setInterval(() => { if (!$("dash").hidden && !wsLive) fetchDevices(); }, 1500);
 dashShow();
