@@ -24,6 +24,8 @@ static const char* const kConfigFiles[] = {
     "/config/network.json",     "/config/network.json.tmp",
     "/config/devices.json",     "/config/devices.json.tmp",
     "/config/devices.json.bak", "/config/devices.json.new",
+    "/config/dashboard.json",   "/config/dashboard.json.tmp",
+    "/config/dashboard.json.bak",
 };
 constexpr size_t kConfigFileCount = sizeof kConfigFiles / sizeof kConfigFiles[0];
 

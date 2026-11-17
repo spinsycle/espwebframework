@@ -20,6 +20,42 @@
 
 <main>
   <section id="dash">
+    <div id="dhead">
+      <div class="seg">
+        <button type="button" id="dmauto" class="on">Auto</button>
+        <button type="button" id="dmmanual">Manual</button>
+      </div>
+      <span id="dtoolbar" hidden>
+        <button type="button" id="dstart" hidden>Edit layout</button>
+        <button type="button" id="dpreview" hidden>Preview</button>
+        <button type="button" id="dsave" hidden>Save</button>
+        <button type="button" id="dcancel" hidden>Cancel</button>
+        <small id="dsize" hidden></small>
+      </span>
+    </div>
+    <p id="dmsg" role="status"></p>
+    <div id="dtabs" class="dtabs" hidden></div>
+    <div id="dgrid" class="dgrid"></div>
+    <p id="dempty" class="hint"></p>
+    <div id="dedit" hidden>
+      <form id="dform" autocomplete="off">
+        <h3>Component</h3>
+        <label>Type <select name="ctype"></select></label>
+        <label>Label (optional) <input name="clabel" maxlength="24"></label>
+        <div id="cf_dev"><label>Device <select name="cdev"></select></label></div>
+        <div id="cf_prop"><label>Shows / controls <select name="cprop"></select></label></div>
+        <div id="cf_dev2"><label>Second device (Y axis) <select name="cdev2"></select></label></div>
+        <div id="cf_action">
+          <label>Action <select name="caction"></select></label>
+        </div>
+        <div id="cf_value"><label>Value <input name="cvalue"></label></div>
+        <div id="cf_opts"><label>Options, one per line as  Label=value <textarea name="copts" rows="4"></textarea></label></div>
+        <div id="cf_group"><label>Devices in the panel</label><div id="cgroup"></div></div>
+        <button type="submit" id="dadd">Add component</button>
+        <p id="dformmsg" role="status"></p>
+      </form>
+    </div>
+    <h3 class="sect">System</h3>
     <div class="grid">
       <div class="card"><h3>Uptime</h3><p id="uptime">-</p></div>
       <div class="card"><h3>Memory</h3><p id="heap">-</p><small id="frag"></small></div>
@@ -156,5 +192,6 @@
   </section>
 </main>
 <script src="app.js"></script>
+<script src="dash.js"></script>
 </body>
 </html>

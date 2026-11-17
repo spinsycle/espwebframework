@@ -7,7 +7,7 @@ $script:pass = 0
 
 function Call($method, $path, $body) {
   $args = @{ UseBasicParsing = $true; Method = $method; Uri = "http://$Ip/api/v1$path"; TimeoutSec = 20 }
-  if ($body) { $args.Body = ($body | ConvertTo-Json -Compress); $args.ContentType = 'application/json' }
+  if ($body) { $args.Body = ($body | ConvertTo-Json -Compress -Depth 8); $args.ContentType = 'application/json' }
   try {
     $r = Invoke-WebRequest @args
     return @{ code = [int]$r.StatusCode; json = ($r.Content | ConvertFrom-Json) }
@@ -224,6 +224,69 @@ Check 'rejected imports changed nothing' (((Call GET '/devices').json.devices.Co
 Check 'factory reset needs the confirm word' ((Call POST '/config/factory-reset' @{ confirm = 'yes' }).json.error -eq 'confirm_required')
 Check 'still there after refused reset' ([bool](Dev 'smoke_ed'))
 Call DELETE '/devices?id=smoke_ed' | Out-Null
+WaitGone
+
+
+Write-Host '== P6 dashboard (validation only: layouts are stored, nothing moves)'
+$sc = Call GET '/dashboard/schema'
+Check 'schema has 13 component types' ($sc.json.types.Count -eq 13)
+Check 'schema grid is 4 columns' ($sc.json.grid.columns -eq 4)
+Check 'schema slider needs a writable level' (($sc.json.types | Where-Object { $_.name -eq 'slider' }).need -eq 'write_level')
+$orig = Call GET '/dashboard'
+Check 'dashboard readable' ($orig.code -eq 200 -and $orig.json.mode -in 'auto', 'manual')
+
+Call POST '/devices' @{ id = 'smoke_dr'; type = 'relay'; pin = $relayPin } | Out-Null
+Call POST '/devices' @{ id = 'smoke_dp'; type = 'pwm'; pin = $pwmPin } | Out-Null
+Settle
+Check 'relay lists a writable state property' ((Dev 'smoke_dr').props | Where-Object { $_.name -eq 'state' -and $_.write })
+Check 'pwm lists a writable level property' ((Dev 'smoke_dp').props | Where-Object { $_.name -eq 'level' -and $_.write })
+
+function Comp($id, $type, $dev, $prop, $col, $row, $w = 1, $h = 1) {
+  @{ id = $id; type = $type; label = $id; tab = 0; binding = @{ device = $dev; property = $prop }; layout = @{ column = $col; row = $row; width = $w; height = $h } }
+}
+function Doc($mode, $comps, $tabs = @()) { @{ schema_version = 1; mode = $mode; tabs = $tabs; components = $comps } }
+
+$good = Doc 'manual' @((Comp 'c1' 'toggle' 'smoke_dr' 'state' 1 1), (Comp 'c2' 'slider' 'smoke_dp' 'level' 2 1 2 1))
+$r = Call PUT '/dashboard' $good
+Check 'valid manual dashboard saved' ($r.code -eq 200)
+$back = Call GET '/dashboard'
+Check 'saved dashboard reads back' ($back.json.mode -eq 'manual' -and $back.json.components.Count -eq 2 -and $back.json.components[1].binding.device -eq 'smoke_dp')
+
+$r = Call PUT '/dashboard' (Doc 'manual' @((Comp 'c1' 'toggle' 'smoke_dp' 'level' 1 1)))
+Check 'toggle on a pwm refused (bad_property, component 0)' ($r.code -eq 400 -and $r.json.reason -eq 'bad_property' -and $r.json.component -eq 0)
+$r = Call PUT '/dashboard' (Doc 'manual' @((Comp 'c1' 'toggle' 'smoke_nope' 'state' 1 1)))
+Check 'unknown device refused' ($r.code -eq 400 -and $r.json.reason -eq 'unknown_device')
+$r = Call PUT '/dashboard' (Doc 'manual' @((Comp 'c1' 'toggle' 'smoke_dr' 'state' 1 1), (Comp 'c2' 'toggle' 'smoke_dr' 'state' 1 1)))
+Check 'overlap refused at component 1' ($r.code -eq 400 -and $r.json.reason -eq 'overlap' -and $r.json.component -eq 1)
+$r = Call PUT '/dashboard' (Doc 'manual' @((Comp 'c1' 'toggle' 'smoke_dr' 'state' 1 1), (Comp 'c1' 'toggle' 'smoke_dr' 'state' 2 1)))
+Check 'duplicate component id refused' ($r.code -eq 400 -and $r.json.reason -eq 'duplicate_id' -and $r.json.component -eq 1)
+$r = Call PUT '/dashboard' (Doc 'manual' @((Comp 'c1' 'toggle' 'smoke_dr' 'state' 4 1 2 1)))
+Check 'component off the right edge refused' ($r.code -eq 400 -and $r.json.reason -eq 'bad_layout')
+$r = Call PUT '/dashboard' (Doc 'manual' @((Comp 'c1' 'joystick' 'smoke_dp' 'level' 1 1)))
+Check 'joystick smaller than 2x2 refused' ($r.code -eq 400 -and $r.json.reason -eq 'bad_layout')
+$c = Comp 'c1' 'toggle' 'smoke_dr' 'state' 1 1; $c.tab = 1
+$r = Call PUT '/dashboard' (Doc 'manual' @($c))
+Check 'tab that does not exist refused' ($r.code -eq 400 -and $r.json.reason -eq 'bad_tab')
+$r = Call PUT '/dashboard' (Doc 'manual' @($c) @('Main', 'Main'))
+Check 'duplicate tab names refused' ($r.code -eq 400 -and $r.json.reason -eq 'bad_tabs')
+$r = Call PUT '/dashboard' (Doc 'sideways' @())
+Check 'unknown mode refused' ($r.code -eq 400 -and $r.json.reason -eq 'bad_mode')
+$r = Call PUT '/dashboard' (Doc 'manual' @($c) @('Main', 'Garage'))
+Check 'a second tab is accepted' ($r.code -eq 200)
+$r = Call PUT '/dashboard' (Doc 'manual' @((Comp 'c1' 'toggle' 'smoke_dr' 'state' 1 1)))
+$back = Call GET '/dashboard'
+$before = $back.json.components.Count
+$null = Call PUT '/dashboard' (Doc 'manual' @((Comp 'c1' 'toggle' 'smoke_nope' 'state' 1 1)))
+Check 'a refused save changed nothing' ((Call GET '/dashboard').json.components.Count -eq $before -and (Call GET '/dashboard').json.components[0].binding.device -eq 'smoke_dr')
+
+$r = Call PUT '/dashboard' (Doc 'auto' @((Comp 'c1' 'toggle' 'smoke_nope' 'state' 1 1)))
+Check 'auto mode stores a layout without checking it' ($r.code -eq 200)
+$r = Call PUT '/dashboard' (Doc 'manual' @((Comp 'c1' 'toggle' 'smoke_nope' 'state' 1 1)))
+Check 'switching to manual does check it' ($r.code -eq 400)
+
+$null = Call PUT '/dashboard' (Doc 'auto' @())
+Call DELETE '/devices?id=smoke_dr' | Out-Null
+Call DELETE '/devices?id=smoke_dp' | Out-Null
 WaitGone
 
 Write-Host ("`n{0} passed, {1} failed" -f $script:pass, $script:fail)

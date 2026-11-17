@@ -10,6 +10,7 @@
 #include "core/Framework.h"
 #include "core/Version.h"
 #include "hal/Hal.h"
+#include "dashboard/DashboardStore.h"
 #include "devices/CommandJson.h"
 #include "devices/DeviceRegistry.h"
 #include "devices/DeviceStore.h"
@@ -208,6 +209,49 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry
   reset->setMethod(HTTP_POST);
   reset->setMaxContentLength(64);
   server_->addHandler(reset);
+
+  // ---- dashboard layout: the browser edits it, the firmware validates it against the devices and stores it.
+  server_->on("/api/v1/dashboard/schema", HTTP_GET, [](AsyncWebServerRequest* r) {
+    JsonDocument d;
+    DashboardStore::describeSchema(d.to<JsonObject>());
+    sendJson(r, d);
+  });
+
+  server_->on("/api/v1/dashboard", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!LittleFS.exists("/config/dashboard.json")) {  // nothing saved yet: automatic mode
+      JsonDocument d;
+      d["schema_version"] = kConfigSchema;
+      d["mode"] = "auto";
+      d["tabs"].to<JsonArray>();
+      d["components"].to<JsonArray>();
+      sendJson(r, d);
+      return;
+    }
+    AsyncWebServerResponse* resp = r->beginResponse(LittleFS, "/config/dashboard.json", "application/json");
+    resp->addHeader("Cache-Control", "no-store");
+    r->send(resp);
+  });
+
+  auto* dash = new AsyncCallbackJsonWebHandler("/api/v1/dashboard", [dv](AsyncWebServerRequest* r, JsonVariant& json) {
+    DashboardStore::Result res = DashboardStore::validate(json, *dv);
+    if (res.err != DashErr::Ok) {
+      JsonDocument d;
+      d["error"] = "invalid_dashboard";
+      d["reason"] = dashErrCode(res.err);
+      d["field"] = dashErrField(res.err);
+      d["component"] = res.index;
+      d["id"] = res.id;
+      sendJson(r, d, 400);
+      return;
+    }
+    if (!DashboardStore::save(json)) { sendError(r, 500, "save_failed"); return; }
+    JsonDocument d;
+    d["ok"] = true;
+    sendJson(r, d);
+  });
+  dash->setMethod(HTTP_PUT);
+  dash->setMaxContentLength(6144);
+  server_->addHandler(dash);
 
   server_->on("/api/v1/i2c", HTTP_GET, [dv](AsyncWebServerRequest* r) {
     JsonDocument d;

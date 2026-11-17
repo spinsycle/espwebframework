@@ -20,6 +20,7 @@ document.querySelectorAll("#tabs button").forEach((b) =>
   b.addEventListener("click", () => {
     document.querySelectorAll("#tabs button").forEach((x) => x.classList.toggle("on", x === b));
     document.querySelectorAll("main > section").forEach((s) => (s.hidden = s.id !== b.dataset.tab));
+    if (b.dataset.tab === "dash") dashShow();
     if (b.dataset.tab === "dev") showDevices();
     if (b.dataset.tab === "net") loadNet();
     if (b.dataset.tab === "sys") loadSys();
@@ -82,7 +83,7 @@ function handleWs(m) {
   else if (m.event === "devices_changed") fetchDevices();
   else if (m.event === "device_state") {
     const d = devices.find((x) => x.id === m.id);
-    if (d) { d.state = m.state; renderDevices(); }
+    if (d) { d.state = m.state; renderDevices(); dashRender(); }
   } else if (m.event === "error") {
     const msg = $("devmsg");
     msg.className = "err";
@@ -142,7 +143,7 @@ function where(d) {
   return "GPIO" + d.pin + (d.invert ? " · inverted" : "");
 }
 
-function devCard(d) {
+function devCard(d, bare) {
   const top = el("div", { className: "top" }, el("strong", { textContent: d.name }),
     el("small", { textContent: d.type + " · " + where(d) }));
   const body = el("div");
@@ -186,7 +187,8 @@ function devCard(d) {
   };
   const ed = el("button", { type: "button", className: "rm", textContent: "edit" });
   ed.onclick = () => startEdit(d);
-  const card = el("div", { className: "card dev" }, top, body, ed, rm);
+  const card = el("div", { className: "card dev" }, top, body);
+  if (!bare) card.append(ed, rm);
   if (d.boot_sensitive) card.append(el("small", { className: "warn", textContent: "Boot-sensitive pin: a wire here can stop the board booting." }));
   return card;
 }
@@ -201,7 +203,7 @@ function renderDevices() {
 }
 
 async function fetchDevices() {
-  try { devices = (await api("/devices")).devices; renderDevices(); } catch (e) { /* the offline dot shows it */ }
+  try { devices = (await api("/devices")).devices; renderDevices(); dashRender(); } catch (e) { /* the offline dot shows it */ }
 }
 
 let devTimer = 0;

@@ -5,6 +5,7 @@
 #include <new>
 
 #include "DeviceStore.h"
+#include "dashboard/DashboardRules.h"
 #include "Drivers.h"
 #include "hal/Hal.h"
 
@@ -213,6 +214,14 @@ void DeviceRegistry::describeState(const DeviceView& v, JsonObject st) {
 void DeviceRegistry::describe(const DeviceView& v, JsonObject out) {
   DeviceStore::toJson(v.cfg, out);
   describeState(v, out["state"].to<JsonObject>());
+  JsonArray props = out["props"].to<JsonArray>();  // what a dashboard component may bind to
+  PropAccess pa[5];
+  size_t npa = deviceProps(v.cfg, pa);
+  for (size_t k = 0; k < npa; k++) {
+    JsonObject o = props.add<JsonObject>();
+    o["name"] = propName(pa[k].prop);
+    o["write"] = pa[k].write;
+  }
   int8_t p[5];
   size_t np = pinsOf(v.cfg, kChip, p);
   for (size_t k = 0; k < np; k++)

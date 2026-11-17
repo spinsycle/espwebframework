@@ -1,5 +1,15 @@
 # Changelog
 
+## P6
+- Dashboard engine. `GET /api/v1/dashboard` returns the saved layout (automatic mode with no components when nothing is saved); `PUT /api/v1/dashboard` validates a whole layout against the registered devices and stores it in `/config/dashboard.json` (temp file then rename, previous copy kept as `.bak`, removed by factory reset); `GET /api/v1/dashboard/schema` publishes the component types, grid size and limits so the editor offers only bindings the firmware will accept.
+- Device list entries now carry `props`: what a component may bind to (relay `state` read/write, pwm / motor / servo `level` read/write, sensor `temp_c` / `humidity` / `pressure_hpa` / `ok`, input `state` / `count`, serial `text` / `count`).
+- 13 component types: toggle, push button, slider, joystick (two devices), gauge, number display, status light, graph, text display, dropdown, progress bar, device card, group panel. The spec's Timer waits for P7 (automation), where it has something to bind to.
+- Layout: 4-column grid, up to 64 rows, components 1-4 wide and tall (joystick and group panel at least 2x2, graph at least 2 wide), up to 6 tabs and 32 components, no overlap on a page. On a phone the page stacks into one column in reading order.
+- Automatic mode builds a layout from the device list in the browser (nothing stored). Manual mode is edited with arrow and size buttons (no drag), a Preview toggle, Save and Cancel. A refused save names the component and the reason and changes nothing.
+- Automatic mode keeps a stored manual layout untouched and unchecked; switching to manual checks it again, so a layout that points at a removed device is refused with the component named.
+- Limits to know: the layout body is at most 6 KB (the editor shows a counter); graphs keep the last 60 points in the browser only; the dashboard is not part of the export / import bundle.
+- Native tests 93 (dashboard rules), mutation check extended; live API test extended.
+
 ## P5
 - Config system: every saved file carries `schema_version` (files from before P5 count as version 1; a file from a newer framework is refused, never guessed at). `devices.json` keeps the previous good copy as `devices.json.bak` and loading falls back to it.
 - Export `GET /api/v1/config/export` (device list, no live state, no Wi-Fi passwords; the network settings are not part of it). Import `POST /api/v1/config/import` replaces every device: the whole file is validated first (each device against the ones before it), a failure names the device (`index`, `id`, `reason`, `field`) and changes nothing; a good import is written to disk and the board restarts.

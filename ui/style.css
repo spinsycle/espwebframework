@@ -35,3 +35,44 @@ dt{color:var(--dim)} dd{margin:0;word-break:break-word}
 .dev input[type=range]{width:100%;padding:0}
 .warn{color:#ffb020}
 [hidden]{display:none!important}
+
+.sect{margin:20px 0 8px;color:var(--dim);font-size:13px;text-transform:uppercase;letter-spacing:.04em}
+#dhead{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;margin-bottom:8px}
+#dtoolbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{background:none;border:0;color:var(--dim);padding:8px 14px;font:inherit}
+.seg button.on{background:var(--panel);color:var(--fg)}
+#dhead button:not(.seg button),.dtabs button,.etb button{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:7px 12px;font:inherit;font-size:14px}
+#dmsg,#dformmsg{min-height:1.4em;color:var(--dim)}
+#dmsg.err,#dformmsg.err{color:var(--bad)}
+.dtabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.dtabs button.on{background:var(--acc);color:#04121f;border-color:var(--acc)}
+.tabtools{display:inline-flex;gap:4px;margin-left:8px}
+.dgrid{display:grid;grid-template-columns:repeat(4,1fr);grid-auto-rows:88px;gap:8px}
+.dc{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:4px;overflow:hidden;min-width:0;position:relative}
+.dc h3{margin:0;font-size:12px;color:var(--dim);font-weight:600;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dc p{margin:0;word-break:break-word}
+.dc .big{font-size:22px}
+.dc.bad{border-color:var(--bad)}
+.dc.editing{outline:2px dashed var(--acc);outline-offset:-2px}
+.dc button.tgl{background:var(--line);color:var(--fg);border:0;border-radius:6px;padding:10px;font:inherit;font-weight:600;flex:1}
+.dc button.tgl.on{background:var(--ok);color:#04210f}
+.dc input[type=range]{width:100%;padding:0}
+.dc select{width:100%}
+.dc .grp{display:grid;gap:8px;overflow:auto}
+.etb{position:absolute;inset:auto 4px 4px 4px;display:flex;flex-wrap:wrap;gap:3px;background:var(--bg);border-radius:6px;padding:3px}
+.etb button{padding:3px 7px;font-size:12px}
+.gauge{--p:0;width:64px;height:64px;border-radius:50%;background:conic-gradient(var(--acc) calc(var(--p) * 1%),var(--line) 0);display:grid;place-items:center;margin:auto}
+.gauge span{background:var(--panel);width:48px;height:48px;border-radius:50%;display:grid;place-items:center;font-size:12px}
+.bar{height:14px;background:var(--line);border-radius:7px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--acc)}
+.graph{width:100%;flex:1;min-height:0;color:var(--acc)}
+.led{width:22px;height:22px;border-radius:50%;background:var(--line)}
+.led.on{background:var(--ok)}
+.joy{position:relative;flex:1;min-height:60px;background:var(--bg);border:1px solid var(--line);border-radius:10px;touch-action:none}
+.joy .knob{position:absolute;left:50%;top:50%;width:34px;height:34px;margin:-17px 0 0 -17px;border-radius:50%;background:var(--acc);pointer-events:none}
+#dform textarea{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:10px;font:inherit}
+@media (max-width:600px){
+  .dgrid{display:flex;flex-direction:column}
+  .dc{min-height:calc(var(--h,1) * 88px)}
+}
