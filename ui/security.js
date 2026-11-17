@@ -73,7 +73,7 @@ byId("pwform").addEventListener("submit", async (e) => {
     const r = await fetch("/api/v1/password", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ current: f.current.value, password: f.password.value }) });
     const j = await r.json().catch(() => ({}));
     if (r.ok) { msg.className = ""; msg.textContent = "Password changed."; setTimeout(() => location.reload(), 600); return; }
-    msg.textContent = j.error === "wrong_password" ? "The current password is wrong." : j.error === "default_password" ? "That is the factory password: pick another." : j.error === "locked" ? "Too many tries. Wait a little." : "Rejected: use 8 to 32 printable characters.";
+    msg.textContent = j.error === "busy" ? "The board was busy saving something. Try again in a moment." : j.error === "wrong_password" ? "The current password is wrong." : j.error === "default_password" ? "That is the factory password: pick another." : j.error === "locked" ? "Too many tries. Wait a little." : "Rejected: use 8 to 32 printable characters.";
   } catch (err) { msg.textContent = "Cannot reach the board."; }
 });
 

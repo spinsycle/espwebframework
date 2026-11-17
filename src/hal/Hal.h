@@ -17,6 +17,18 @@ void resetReason(char* out, size_t n);
 void restart();
 
 bool fsBegin();                   // mounts LittleFS, formats it on first use
+
+// LittleFS on the ESP8266 is not re-entrant. A write on the main loop yields while the flash works, a web
+// request can run then, and if that request starts a second write the file system asserts and the board
+// restarts. So: every write on the main loop holds an FsWrite for its duration, and a write started from a
+// web callback first checks fsBusy() and answers "busy" (the client tries again) instead of starting.
+bool fsBusy();
+struct FsWrite {
+  FsWrite();
+  ~FsWrite();
+  FsWrite(const FsWrite&) = delete;
+  FsWrite& operator=(const FsWrite&) = delete;
+};
 size_t fsTotal();
 size_t fsUsed();
 

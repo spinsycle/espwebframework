@@ -516,7 +516,7 @@ $("dform").addEventListener("submit", (e) => {
 function describeError(e) {
   const b = e.body || {};
   if (b.reason) return "Rejected" + (b.component >= 0 ? " at component " + (b.component + 1) + (b.id ? " '" + b.id + "'" : "") : "") + ": " + b.reason + (b.field ? " (" + b.field + ")" : "");
-  return "Failed: " + e.message;
+  return e.message === "busy" ? "The board was busy saving something. Try again in a moment." : "Failed: " + e.message;
 }
 
 async function saveDash(doc) {

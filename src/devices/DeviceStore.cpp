@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <LittleFS.h>
 
+#include "hal/Hal.h"
+
 #include "config/ConfigRules.h"
 
 namespace espwf {
@@ -198,9 +200,9 @@ static bool commit(const char* from) {
   return LittleFS.rename(from, kFile);
 }
 
-bool save(const DeviceConfig* devs, size_t n) { return writeList(kTmp, devs, n) && commit(kTmp); }
-bool saveNew(const DeviceConfig* devs, size_t n) { return writeList(kNew, devs, n); }
-bool commitNew() { return commit(kNew); }
+bool save(const DeviceConfig* devs, size_t n) { hal::FsWrite g; return writeList(kTmp, devs, n) && commit(kTmp); }
+bool saveNew(const DeviceConfig* devs, size_t n) { hal::FsWrite g; return writeList(kNew, devs, n); }
+bool commitNew() { hal::FsWrite g; return commit(kNew); }
 
 }  // namespace DeviceStore
 }  // namespace espwf

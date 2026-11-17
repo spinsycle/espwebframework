@@ -45,7 +45,10 @@ void FrameworkController::loop() {
     resetPending_ = false;
     devices_.halt();  // nothing may write a config file after this point
     automation_.halt();
-    for (const char* f : espwf::kConfigFiles) LittleFS.remove(f);
+    {
+      hal::FsWrite g;
+      for (const char* f : espwf::kConfigFiles) LittleFS.remove(f);
+    }
     Serial.println("[espwf] factory reset: saved config deleted, restarting");
     restart();
   }

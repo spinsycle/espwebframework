@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <LittleFS.h>
 
+#include "hal/Hal.h"
+
 namespace espwf {
 namespace NetworkStore {
 
@@ -117,6 +119,7 @@ bool load(NetworkConfig& cfg) {
 }
 
 bool save(const NetworkConfig& cfg) {
+  hal::FsWrite g;
   if (!LittleFS.exists("/config")) LittleFS.mkdir("/config");
   JsonDocument doc;
   toJson(cfg, doc.to<JsonObject>(), true);

@@ -201,6 +201,7 @@ if ($Chip -eq 'esp8266') {
 Check 'delete unknown 404' ((Call DELETE '/devices?id=smoke_nope').code -eq 404)
 foreach ($id in ((Call GET '/devices').json.devices | Where-Object { $_.id -like 'smoke_*' } | ForEach-Object { $_.id })) {
   Check "delete $id" ((Call DELETE "/devices?id=$id").code -eq 202)
+  Start-Sleep -Milliseconds 350   # the board queues 6 changes; a burst of 8 would be refused as busy
 }
 WaitGone   # each removal saves to flash, so a burst of them takes a second or two
 Check 'all removed' (-not ((Call GET '/devices').json.devices | Where-Object { $_.id -like 'smoke_*' }))

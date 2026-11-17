@@ -5,6 +5,7 @@
 #include <new>
 
 #include "config/ConfigRules.h"
+#include "hal/Hal.h"
 
 namespace espwf {
 namespace AutomationStore {
@@ -418,6 +419,7 @@ size_t load(AutomationCore& core) {
 }
 
 bool save(const AutoSettings& s, const AutomationCore& core) {
+  hal::FsWrite g;
   if (!LittleFS.exists("/config")) LittleFS.mkdir("/config");
   File f = LittleFS.open(kTmp, "w");
   if (!f) return false;

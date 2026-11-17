@@ -274,6 +274,7 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry
       sendJson(r, d, 400);
       return;
     }
+    if (hal::fsBusy()) { sendError(r, 503, "busy"); return; }  // the main loop is writing a file: try again in a moment
     if (!DashboardStore::save(json)) { sendError(r, 500, "save_failed"); return; }
     JsonDocument d;
     d["ok"] = true;
@@ -371,6 +372,7 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry
     const char* nxt = json["password"].is<const char*>() ? json["password"].as<const char*>() : "";
     char tok[kTokenChars + 1];
     tokenFrom(r, tok);
+    if (hal::fsBusy()) { sendError(r, 503, "busy"); return; }  // see hal::FsWrite
     AuthErr e = au->changePassword(cur, nxt, tok);
     if (e == AuthErr::Ok) {
       JsonDocument d;
@@ -413,6 +415,7 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry
           char tok[kTokenChars + 1];
           if (!tokenFrom(r, tok) || !au->valid(tok) || au->mustChange()) otaFail("unauthorized");
           else if (espwf::Ota::busy()) otaFail("another update is running");
+          else if (hal::fsBusy()) otaFail("the board is busy saving: try again in a moment");
           else if (!filename.endsWith(".bin")) otaFail("not a .bin file");
           else {
             String md5 = r->hasParam("md5") ? r->getParam("md5")->value() : String();

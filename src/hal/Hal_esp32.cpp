@@ -40,6 +40,11 @@ void resetReason(char* out, size_t n) {
 
 void restart() { ESP.restart(); }
 
+static volatile int gFsWriters = 0;
+bool fsBusy() { return gFsWriters > 0; }
+FsWrite::FsWrite() { gFsWriters = gFsWriters + 1; }
+FsWrite::~FsWrite() { gFsWriters = gFsWriters - 1; }
+
 bool fsBegin() { return LittleFS.begin(true); }  // true = format on first use
 size_t fsTotal() { return LittleFS.totalBytes(); }
 size_t fsUsed() { return LittleFS.usedBytes(); }
