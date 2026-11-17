@@ -7,10 +7,14 @@ $script:fail = 0
 $script:pass = 0
 
 $script:token = ''
-function CallAs($token, $method, $path, $body, $cookie = '') {
+function CallAs($token, $method, $path, $body, $cookies = $null) {
   $args = @{ UseBasicParsing = $true; Method = $method; Uri = "http://$Ip/api/v1$path"; TimeoutSec = 20 }
   if ($token) { $args.Headers = @{ Authorization = "Bearer $token" } }
-  if ($cookie) { $args.Headers = @{ Cookie = $cookie } }
+  if ($cookies) {  # Invoke-WebRequest ignores a hand-written Cookie header: use a cookie jar
+    $jar = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+    foreach ($k in $cookies.Keys) { $jar.Cookies.Add((New-Object System.Net.Cookie($k, $cookies[$k], '/', $Ip))) }
+    $args.WebSession = $jar
+  }
   if ($body) { $args.Body = ($body | ConvertTo-Json -Compress -Depth 8); $args.ContentType = 'application/json' }
   try {
     $r = Invoke-WebRequest @args
@@ -627,9 +631,9 @@ Check 'no login: POST /system/restart is 401' ((Anon POST '/system/restart').cod
 
 Check 'a made-up token is refused' ((CallAs ('0' * 32) GET '/devices').code -eq 401)
 Check 'a token of the wrong length is refused' ((CallAs 'abc' GET '/devices').code -eq 401)
-Check 'the session cookie works too' ((CallAs '' GET '/devices' $null "sid=$($script:token)").code -eq 200)
-Check 'among other cookies' ((CallAs '' GET '/devices' $null "theme=dark; sid=$($script:token); x=1").code -eq 200)
-Check 'a cookie whose name only ends in sid is ignored' ((CallAs '' GET '/devices' $null "xsid=$($script:token)").code -eq 401)
+Check 'the session cookie works too' ((CallAs '' GET '/devices' $null @{ sid = $script:token }).code -eq 200)
+Check 'among other cookies' ((CallAs '' GET '/devices' $null @{ theme = 'dark'; sid = $script:token; x = '1' }).code -eq 200)
+Check 'a cookie whose name only ends in sid is ignored' ((CallAs '' GET '/devices' $null @{ xsid = $script:token }).code -eq 401)
 
 $bad = Anon POST '/session' @{ password = 'definitely-wrong' }
 Check 'a wrong password is refused' ($bad.code -eq 401 -and $bad.json.error -eq 'bad_credentials')
