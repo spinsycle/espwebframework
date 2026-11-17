@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP Control</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <strong id="devname">ESP CONTROL</strong>
+  <span id="online" class="dot off" title="offline"></span>
+</header>
+<nav id="tabs">
+  <button data-tab="dash" class="on">Dashboard</button>
+  <button data-tab="net">Network</button>
+  <button data-tab="sys">System</button>
+</nav>
+
+<main>
+  <section id="dash">
+    <div class="grid">
+      <div class="card"><h3>Uptime</h3><p id="uptime">-</p></div>
+      <div class="card"><h3>Memory</h3><p id="heap">-</p><small id="frag"></small></div>
+      <div class="card"><h3>Storage</h3><p id="fs">-</p></div>
+      <div class="card"><h3>Access point</h3><p id="ap">-</p></div>
+      <div class="card"><h3>Wi-Fi client</h3><p id="sta">-</p></div>
+      <div class="card"><h3>Last reset</h3><p id="reset">-</p></div>
+    </div>
+  </section>
+
+  <section id="net" hidden>
+    <form id="netform" autocomplete="off">
+      <label>Mode
+        <select name="mode">
+          <option value="ap">Access point only</option>
+          <option value="sta">Join existing Wi-Fi</option>
+          <option value="ap_sta">Both</option>
+        </select>
+      </label>
+      <label>Hostname <input name="hostname" maxlength="32"></label>
+      <fieldset>
+        <legend>Access point</legend>
+        <label>SSID <input name="ap_ssid" maxlength="32"></label>
+        <label>Password <input name="ap_password" type="password" maxlength="63" placeholder="unchanged"></label>
+        <label>Channel <input name="ap_channel" type="number" min="1" max="13"></label>
+        <label>IP address <input name="ap_ip"></label>
+      </fieldset>
+      <fieldset>
+        <legend>Wi-Fi client</legend>
+        <label>SSID <input name="sta_ssid" maxlength="32"></label>
+        <label>Password <input name="sta_password" type="password" maxlength="63" placeholder="unchanged"></label>
+        <label class="row"><input name="sta_static" type="checkbox"> Static IP</label>
+        <div id="staticbox">
+          <label>IP address <input name="sta_ip"></label>
+          <label>Gateway <input name="sta_gateway"></label>
+          <label>Subnet mask <input name="sta_mask"></label>
+        </div>
+      </fieldset>
+      <button type="submit">Save and apply</button>
+      <p id="netmsg" role="status"></p>
+    </form>
+  </section>
+
+  <section id="sys" hidden>
+    <div class="card"><dl id="sysinfo"></dl></div>
+    <button id="restart" type="button" class="danger">Restart device</button>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

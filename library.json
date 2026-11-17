@@ -5,5 +5,9 @@
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/spinsycle/espwebframework.git" },
   "frameworks": "arduino",
-  "platforms": ["espressif8266", "espressif32"]
+  "platforms": ["espressif8266", "espressif32"],
+  "dependencies": [
+    {"owner": "esp32async", "name": "ESPAsyncWebServer", "version": "3.12.1"},
+    {"owner": "bblanchon", "name": "ArduinoJson", "version": "7.4.3"}
+  ]
 }

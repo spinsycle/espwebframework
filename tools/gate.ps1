@@ -4,6 +4,8 @@ Set-Location (Split-Path $PSScriptRoot -Parent)
 $steps = @(
   @('build nodemcuv2', @('run','-e','nodemcuv2')),
   @('build esp32dev',  @('run','-e','esp32dev')),
+  @('fs image nodemcuv2', @('run','-e','nodemcuv2','-t','buildfs')),
+  @('fs image esp32dev',  @('run','-e','esp32dev','-t','buildfs')),
   @('native tests',    @('test','-e','native'))
 )
 foreach ($s in $steps) {

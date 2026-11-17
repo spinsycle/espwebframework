@@ -1,23 +1,24 @@
-// P0 smoke harness: blink the onboard LED and print the framework version.
-#include <Arduino.h>
-#include "core/Version.h"
+// Smoke harness: framework up (AP + web UI) plus a non-blocking LED blink as a liveness signal.
+#include <Framework.h>
+
+FrameworkController Framework;
 
 #ifndef LED_BUILTIN
 #define LED_BUILTIN 2
 #endif
 
 void setup() {
-  Serial.begin(115200);
   pinMode(LED_BUILTIN, OUTPUT);
-  char v[16];
-  espwf::versionString(v, sizeof v);
-  Serial.printf("\nespwebframework %s smoke\n", v);
+  Framework.setDeviceName("Smoke Test");
+  Framework.begin();
 }
 
 void loop() {
+  Framework.loop();
+
   static uint32_t last = 0;
   static bool on = false;
-  if (millis() - last >= 500) {  // non-blocking, no delay()
+  if (millis() - last >= 500) {  // no delay()
     last = millis();
     on = !on;
     digitalWrite(LED_BUILTIN, on ? LOW : HIGH);
