@@ -115,6 +115,21 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry
     sendJson(r, d, 202);
   });
 
+  // ---- I2C bus scan: POST queues it, GET returns the last result (and whether one is running).
+  server_->on("/api/v1/i2c", HTTP_GET, [dv](AsyncWebServerRequest* r) {
+    JsonDocument d;
+    dv->describeScan(d.to<JsonObject>());
+    sendJson(r, d);
+  });
+  server_->on("/api/v1/i2c/scan", HTTP_POST, [dv](AsyncWebServerRequest* r) {
+    ScanErr e = dv->requestScan();
+    if (e == ScanErr::Busy) { sendError(r, 409, "busy", ""); return; }
+    if (e == ScanErr::PinsInUse) { sendError(r, 409, "pin_in_use", "pin"); return; }
+    JsonDocument d;
+    d["ok"] = true;
+    sendJson(r, d, 202);
+  });
+
   auto* add = new AsyncCallbackJsonWebHandler("/api/v1/devices", [dv](AsyncWebServerRequest* r, JsonVariant& json) {
     DeviceConfig c;
     DevErr e = DeviceStore::applyJson(json, c);

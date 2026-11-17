@@ -19,7 +19,12 @@ CmdErr parseCommandJson(JsonVariantConst json, const char*& id, Command& out) {
   } else if (val.is<double>()) {
     out.hasValue = true;
     out.value = val.as<double>();
-  }  // a string or object leaves hasValue false, which checkCommand reports as bad_value
+  } else if (val.is<const char*>()) {  // serial "send"; a longer line is cut at the cap and rejected as too long
+    const char* t = val.as<const char*>();
+    out.isText = true;
+    if (strlen(t) >= kTextCap) { memset(out.text, 'x', kTextCap); return CmdErr::Ok; }  // no terminator: bad_value
+    strcpy(out.text, t);
+  }  // an object leaves hasValue false, which checkCommand reports as bad_value
   return CmdErr::Ok;
 }
 

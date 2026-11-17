@@ -29,11 +29,19 @@ struct CriticalSection {
   CriticalSection& operator=(const CriticalSection&) = delete;
 };
 
-// PWM, duty in permille (0..1000). `slot` is a small index unique per PWM device (ESP32 LEDC channel).
-// ESP8266: the PWM frequency is global; the last device attached sets it.
+// PWM, duty in 1/10000 (0..10000; a servo pulse needs the fine steps). `slot` is a small index unique per
+// PWM device (0..7). ESP8266: the PWM frequency is global (the last device attached sets it, and
+// validateDevice keeps every PWM device on one frequency). ESP32: each slot owns its own LEDC timer.
 void pwmAttach(int pin, uint32_t freqHz, uint8_t slot);
-void pwmWrite(int pin, uint8_t slot, uint16_t permille);
+void pwmWrite(int pin, uint8_t slot, uint16_t duty10k);
 void pwmDetach(int pin, uint8_t slot);
+
+// One extra serial port for a "serial" device (UART0 stays the log console).
+// ESP8266: software serial on any two pins (reliable to 38400 baud). ESP32: UART2 on any two pins.
+bool uartBegin(int rxPin, int txPin, uint32_t baud);
+void uartEnd();
+int uartRead();                        // next byte, or -1 if none waiting
+void uartWrite(const char* s, size_t n);
 
 }  // namespace hal
 }  // namespace espwf

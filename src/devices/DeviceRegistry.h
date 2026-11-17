@@ -13,8 +13,16 @@ struct DeviceView {  // a copy of one device, safe to read outside any lock
   DeviceConfig cfg;
   bool on = false;       // relay: energized; input: active
   uint8_t duty = 0;      // pwm percent
-  uint32_t edges = 0;    // input: debounced changes since boot
+  uint32_t edges = 0;    // input: debounced changes since boot; serial: lines received
+  int16_t val = 0;       // motor: speed -100..100; servo: angle
+  uint32_t longs = 0;    // input: long presses since boot
+  bool ok = false;       // sensor: last reading is good
+  bool hasHum = false;   // sensor: the chip reports humidity (BME280, not BMP280)
+  float temp = 0, hum = 0, press = 0;
+  char text[kTextCap] = {0};  // serial: last line received
 };
+
+enum class ScanErr : uint8_t { Ok, Busy, PinsInUse };
 
 class DeviceRegistry {
  public:
@@ -24,6 +32,10 @@ class DeviceRegistry {
   DevErr requestAdd(const DeviceConfig& cfg);
   DevErr requestRemove(const char* id);
   CmdErr requestCommand(const char* id, const Command& cmd);
+
+  // I2C bus scan: queued here, run in loop(); poll describeScan() for the result.
+  ScanErr requestScan();
+  void describeScan(JsonObject out) const;
 
   size_t count() const;
   bool view(size_t index, DeviceView& out) const;
@@ -42,6 +54,16 @@ class DeviceRegistry {
     uint32_t edges = 0;
     uint8_t slot = 0;  // pwm slot
     Debouncer deb;
+    int16_t val = 0;   // motor speed / servo angle
+    uint32_t longs = 0;
+    uint32_t pressedAt = 0;
+    bool longDone = true;
+    // sensor
+    bool ok = false, hasHum = false, ready = false;
+    uint8_t phase = 0, fails = 0;  // phase 0 = idle, 1 = waiting for a conversion
+    uint32_t next = 0, t0 = 0;
+    float temp = 0, hum = 0, press = 0;
+    void* h = nullptr;  // DS18B20 line handle
   };
   struct Op {
     enum Kind : uint8_t { Add, Remove, Cmd } kind = Add;
@@ -59,14 +81,36 @@ class DeviceRegistry {
   void doCommand(const char* id, const Command& cmd);
   void startHw(size_t i);
   void stopHw(size_t i);
+  uint8_t allocSlot();
   void driveRelay(size_t i);
   void drivePwm(size_t i);
+  void driveMotor(size_t i);
+  void driveServo(size_t i);
   void pollInputs();
+  void pollSensors();
+  void sensorFail(size_t i, uint32_t now);
+  void sensorSet(size_t i, float t, float h, float p, uint32_t now);
+  void pollSerial();
+  void serialEmit();
+  void doScan();
 
   DeviceConfig cfg_[kMaxDevices];
   Runtime rt_[kMaxDevices];
   size_t n_ = 0;
   uint8_t pwmSlots_ = 0;  // bit i set = slot i in use
+
+  // The one serial device (validateDevice allows at most one) keeps its text here, not per device.
+  char serialLast_[kTextCap] = {0};
+  char rxBuf_[kTextCap] = {0};
+  uint8_t rxLen_ = 0;
+  uint32_t serialLines_ = 0;
+  bool serialOn_ = false;
+
+  volatile bool scanReq_ = false;
+  volatile bool scanning_ = false;
+  volatile bool scanDone_ = false;
+  uint8_t found_[16] = {0};
+  uint8_t nFound_ = 0;
 
   OpQueue<Op, kQueue> queue_;
   volatile uint32_t stateVer_ = 0;

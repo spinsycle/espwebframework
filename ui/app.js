@@ -121,9 +121,30 @@ function command(id, action, value) {
     .then(() => setTimeout(fetchDevices, 200));
 }
 
+function slider(d, min, max, value, unit) {
+  const out = el("span", { textContent: value + unit });
+  const r = el("input", { type: "range", min, max, value });
+  let last = 0;
+  r.oninput = () => {
+    out.textContent = r.value + unit;
+    const now = performance.now();
+    if (now - last > 60) { last = now; command(d.id, "set", +r.value).catch(() => {}); }  // live while dragging, ~16/s
+  };
+  r.onchange = () => { command(d.id, "set", +r.value).catch(() => {}); r.blur(); };  // final value; blur lets updates redraw
+  return [out, r];
+}
+
+function where(d) {
+  if (d.type === "servo" && d.model === "pca9685") return "pca9685 0x" + d.i2c_addr.toString(16) + " ch" + d.channel;
+  if (d.type === "sensor" && d.model === "bme280") return "bme280 0x" + d.i2c_addr.toString(16);
+  if (d.type === "motor") return "GPIO" + d.pin + "/" + d.pin2 + (d.pin3 !== undefined ? "/" + d.pin3 : "") + (d.invert ? " · inverted" : "");
+  if (d.type === "serial") return "RX GPIO" + d.pin + " TX GPIO" + d.pin2 + " · " + d.baud;
+  return "GPIO" + d.pin + (d.invert ? " · inverted" : "");
+}
+
 function devCard(d) {
   const top = el("div", { className: "top" }, el("strong", { textContent: d.name }),
-    el("small", { textContent: d.type + " · GPIO" + d.pin + (d.invert ? " · inverted" : "") }));
+    el("small", { textContent: d.type + " · " + where(d) }));
   const body = el("div");
   if (d.type === "relay") {
     const on = d.state.on;
@@ -131,18 +152,31 @@ function devCard(d) {
     b.onclick = () => command(d.id, "toggle").catch(() => {});
     body.append(b);
   } else if (d.type === "pwm") {
-    const out = el("span", { textContent: d.state.duty + " %" });
-    const r = el("input", { type: "range", min: 0, max: 100, value: d.state.duty });
-    let last = 0;
-    r.oninput = () => {
-      out.textContent = r.value + " %";
-      const now = performance.now();
-      if (now - last > 60) { last = now; command(d.id, "set", +r.value).catch(() => {}); }  // live while dragging, ~16/s
-    };
-    r.onchange = () => { command(d.id, "set", +r.value).catch(() => {}); r.blur(); };  // final value; blur lets updates redraw
-    body.append(out, r);
+    body.append(...slider(d, 0, 100, d.state.duty, " %"));
+  } else if (d.type === "motor") {
+    const stop = el("button", { type: "button", className: "tgl", textContent: "STOP" });
+    stop.onclick = () => command(d.id, "stop").catch(() => {});
+    body.append(...slider(d, -100, 100, d.state.speed, " %"), stop);
+  } else if (d.type === "servo") {
+    body.append(...slider(d, 0, 180, d.state.angle, "°"));
+  } else if (d.type === "sensor") {
+    const s = d.state;
+    if (!s.ok) body.append(el("p", { textContent: "no reading" }));
+    else {
+      body.append(el("p", { textContent: s.temp_c.toFixed(1) + " °C" }));
+      if (s.humidity !== undefined) body.append(el("small", { textContent: s.humidity.toFixed(1) + " % RH · " }));
+      if (s.pressure_hpa !== undefined) body.append(el("small", { textContent: s.pressure_hpa.toFixed(1) + " hPa" }));
+    }
+  } else if (d.type === "serial") {
+    const txt = el("input", { type: "text", maxLength: 47, placeholder: "line to send" });
+    const send = el("button", { type: "button", className: "tgl", textContent: "Send" });
+    const go = () => { if (txt.value) command(d.id, "send", txt.value).then(() => (txt.value = "")).catch(() => {}); };
+    send.onclick = go;
+    txt.onkeydown = (ev) => { if (ev.key === "Enter") go(); };
+    body.append(el("p", { textContent: d.state.last || "(nothing received)" }), el("small", { textContent: d.state.rx_lines + " lines received" }), txt, send);
   } else {
-    body.append(el("p", { textContent: d.state.active ? "ACTIVE" : "inactive" }), el("small", { textContent: d.state.edges + " changes" }));
+    body.append(el("p", { textContent: d.state.active ? "ACTIVE" : "inactive" }),
+      el("small", { textContent: d.state.edges + " changes" + (d.long_ms ? " · " + d.state.long_presses + " long presses" : "") }));
   }
   const rm = el("button", { type: "button", className: "rm", textContent: "remove" });
   rm.onclick = async () => {
@@ -155,7 +189,7 @@ function devCard(d) {
   return card;
 }
 
-const sliderInUse = () => document.activeElement && document.activeElement.type === "range";
+const sliderInUse = () => document.activeElement && (document.activeElement.type === "range" || document.activeElement.type === "text");
 
 function renderDevices() {
   if ($("dev").hidden) return;
@@ -177,22 +211,45 @@ function showDevices() {
 }
 
 
+const PINLABEL = { motor: "Speed (PWM / enable) pin", serial: "RX pin", servo: "Signal pin", sensor: "1-Wire data pin" };
+
 function syncDevForm() {
   const f = $("devform").elements, t = f.type.value;
-  $("devform").querySelectorAll("[data-for]").forEach((d) => (d.hidden = !d.dataset.for.split(" ").includes(t)));
-  $("invlabel").textContent = t === "input" ? "Pressed reads low (inverted)" : t === "pwm" ? "Inverted duty" : "Active low (relay on = pin low)";
-  $("initlabel").textContent = t === "pwm" ? "(duty %)" : "(0 off, 1 on)";
+  const pca = t === "servo" && f.smodel.value === "pca9685", bme = t === "sensor" && f.xmodel.value === "bme280";
+  const keys = [t, pca ? "pca" : "", bme ? "bme" : ""];
+  $("devform").querySelectorAll("[data-for]").forEach((d) => (d.hidden = !d.dataset.for.split(" ").some((k) => keys.includes(k))));
+  $("pinbox").hidden = $("pinbox").hidden || pca || bme;  // those two sit on the I2C bus, not a pin
+  $("pinlabel").textContent = PINLABEL[t] || "GPIO pin";
+  $("pin2label").textContent = t === "serial" ? "TX pin" : "Direction pin (IN1)";
+  $("invlabel").textContent = t === "input" ? "Pressed reads low (inverted)" : t === "pwm" ? "Inverted duty" : t === "motor" ? "Reverse direction" : "Active low (relay on = pin low)";
+  $("initlabel").textContent = t === "pwm" ? "(duty %)" : t === "servo" ? "(angle, degrees)" : "(0 off, 1 on)";
+  f.initial.value = t === "servo" ? 90 : 0;
 }
 $("devform").elements.type.addEventListener("change", syncDevForm);
+$("devform").elements.smodel.addEventListener("change", syncDevForm);
+$("devform").elements.xmodel.addEventListener("change", syncDevForm);
 syncDevForm();
 
 $("devform").addEventListener("submit", async (e) => {
   e.preventDefault();
   const f = $("devform").elements, t = f.type.value, msg = $("devmsg");
-  const body = { id: f.id.value, name: f.name.value, type: t, pin: +f.pin.value, invert: f.invert.checked };
-  if (t === "input") { body.pullup = f.pullup.checked; body.debounce_ms = +f.debounce_ms.value; }
-  if (t === "pwm") body.freq_hz = +f.freq_hz.value;
-  if (t !== "input") body.initial = +f.initial.value;
+  const body = { id: f.id.value, name: f.name.value, type: t, invert: f.invert.checked };
+  const num = (x) => (x.value === "" ? -1 : +x.value);
+  const onBus = (t === "servo" && f.smodel.value === "pca9685") || (t === "sensor" && f.xmodel.value === "bme280");
+  body.pin = onBus ? -1 : num(f.pin);
+  if (t === "input") { body.pullup = f.pullup.checked; body.debounce_ms = +f.debounce_ms.value; body.long_ms = +f.long_ms.value; }
+  if (t === "pwm" || t === "motor") body.freq_hz = +f.freq_hz.value;
+  if (t === "relay" || t === "pwm" || t === "servo") body.initial = +f.initial.value;
+  if (t === "motor") { body.pin2 = num(f.pin2); if (f.pin3.value !== "") body.pin3 = +f.pin3.value; }
+  if (t === "serial") { body.pin2 = num(f.pin2); body.baud = +f.baud.value; }
+  if (t === "servo") {
+    body.model = f.smodel.value; body.min_us = +f.min_us.value; body.max_us = +f.max_us.value;
+    if (onBus) { body.i2c_addr = Number(f.saddr.value); body.channel = +f.channel.value; }
+  }
+  if (t === "sensor") {
+    body.model = f.xmodel.value; body.interval_s = +f.interval_s.value;
+    if (onBus) body.i2c_addr = +f.xaddr.value;
+  }
   msg.className = "";
   try {
     await api("/devices", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -205,6 +262,28 @@ $("devform").addEventListener("submit", async (e) => {
     msg.textContent = "Rejected: " + err.message + (err.field ? " (" + err.field + ")" : "");
   }
 });
+
+// ---- I2C scan
+async function showScan() {
+  const res = $("i2cres");
+  try {
+    const s = await api("/i2c");
+    $("i2cpins").textContent = "SDA GPIO" + s.sda + " · SCL GPIO" + s.scl;
+    if (s.scanning) { res.textContent = "Scanning..."; setTimeout(showScan, 400); return; }
+    if (!s.done) return;
+    res.textContent = s.found.length ? s.found.map((x) => "0x" + x.addr.toString(16).padStart(2, "0") + (x.name ? " " + x.name : "")).join("\n") : "Nothing answered. Check wiring and pull-ups.";
+    res.style.whiteSpace = "pre-line";
+  } catch (e) { res.textContent = "Scan failed: " + e.message; }
+}
+$("i2cscan").onclick = async () => {
+  try {
+    await api("/i2c/scan", { method: "POST" });
+    $("i2cres").textContent = "Scanning...";
+    setTimeout(showScan, 400);
+  } catch (e) {
+    $("i2cres").textContent = e.message === "pin_in_use" ? "A device is using the I2C pins. Remove it first." : "Scan refused: " + e.message;
+  }
+};
 
 // ---- network
 const F = () => $("netform").elements;

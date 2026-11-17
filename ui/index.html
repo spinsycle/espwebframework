@@ -43,23 +43,68 @@
           <option value="relay">Relay / digital output</option>
           <option value="input">Digital input / button</option>
           <option value="pwm">PWM output</option>
+          <option value="motor">DC motor (H-bridge)</option>
+          <option value="servo">Servo</option>
+          <option value="sensor">Sensor (DS18B20, BME280)</option>
+          <option value="serial">Serial device</option>
         </select>
       </label>
-      <label>GPIO pin <input name="pin" type="number" min="0" max="39" required></label>
-      <label class="row"><input name="invert" type="checkbox"> <span id="invlabel">Active low</span></label>
+      <div data-for="relay input pwm motor serial servo sensor" id="pinbox">
+        <label><span id="pinlabel">GPIO pin</span> <input name="pin" type="number" min="0" max="39"></label>
+      </div>
+      <div data-for="motor serial">
+        <label><span id="pin2label">Direction pin</span> <input name="pin2" type="number" min="0" max="39"></label>
+      </div>
+      <div data-for="motor">
+        <label>Second direction pin (IN2, optional) <input name="pin3" type="number" min="0" max="39"></label>
+      </div>
+      <div data-for="relay input pwm motor">
+        <label class="row"><input name="invert" type="checkbox"> <span id="invlabel">Active low</span></label>
+      </div>
       <div data-for="input">
         <label class="row"><input name="pullup" type="checkbox"> Internal pull-up</label>
         <label>Debounce (ms) <input name="debounce_ms" type="number" min="0" max="1000" value="30"></label>
+        <label>Long press (ms, 0 = off) <input name="long_ms" type="number" min="0" max="10000" value="0"></label>
       </div>
-      <div data-for="pwm">
+      <div data-for="pwm motor">
         <label>Frequency (Hz) <input name="freq_hz" type="number" min="1" max="20000" value="1000"></label>
       </div>
-      <div data-for="relay pwm">
-        <label>At boot <span id="initlabel">(0 off, 1 on)</span> <input name="initial" type="number" min="0" max="100" value="0"></label>
+      <div data-for="relay pwm servo">
+        <label>At boot <span id="initlabel">(0 off, 1 on)</span> <input name="initial" type="number" min="0" max="180" value="0"></label>
+      </div>
+      <div data-for="servo">
+        <label>Driver
+          <select name="smodel"><option value="direct">Pin driven directly</option><option value="pca9685">PCA9685 board</option></select>
+        </label>
+        <div data-for="pca">
+          <label>Board address <input name="saddr" value="0x40"></label>
+          <label>Channel (0-15) <input name="channel" type="number" min="0" max="15" value="0"></label>
+        </div>
+        <label>Pulse at 0 degrees (us) <input name="min_us" type="number" min="300" max="3000" value="500"></label>
+        <label>Pulse at 180 degrees (us) <input name="max_us" type="number" min="300" max="3000" value="2400"></label>
+      </div>
+      <div data-for="sensor">
+        <label>Chip
+          <select name="xmodel"><option value="ds18b20">DS18B20 (1-Wire pin)</option><option value="bme280">BME280 / BMP280 (I2C)</option></select>
+        </label>
+        <div data-for="bme">
+          <label>Address <select name="xaddr"><option value="118">0x76</option><option value="119">0x77</option></select></label>
+        </div>
+        <label>Read every (s) <input name="interval_s" type="number" min="1" max="3600" value="5"></label>
+      </div>
+      <div data-for="serial">
+        <label>Baud
+          <select name="baud"><option>1200</option><option>2400</option><option>4800</option><option selected>9600</option><option>19200</option><option>38400</option><option>57600</option><option>115200</option></select>
+        </label>
       </div>
       <button type="submit">Add device</button>
       <p id="devmsg" role="status"></p>
     </form>
+    <div class="card" id="i2ccard">
+      <h3>I2C bus <small id="i2cpins"></small></h3>
+      <button id="i2cscan" type="button">Scan bus</button>
+      <p id="i2cres" class="hint">Not scanned yet.</p>
+    </div>
   </section>
 
   <section id="net" hidden>

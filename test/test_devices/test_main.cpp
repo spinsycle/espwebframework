@@ -230,7 +230,7 @@ void test_parse_helpers() {
   TEST_ASSERT_FALSE(parseAction(nullptr, a));
   DeviceType t;
   TEST_ASSERT_TRUE(parseDeviceType("input", t)); EQ(DeviceType::Input, t);
-  TEST_ASSERT_FALSE(parseDeviceType("motor", t));
+  TEST_ASSERT_FALSE(parseDeviceType("stepper", t));
 }
 
 // ---- mapping

@@ -1,8 +1,10 @@
 #include "DeviceRegistry.h"
 
 #include <Arduino.h>
+#include <math.h>
 
 #include "DeviceStore.h"
+#include "Drivers.h"
 #include "hal/Hal.h"
 
 namespace espwf {
@@ -12,6 +14,9 @@ static constexpr Chip kChip = Chip::Esp8266;
 #else
 static constexpr Chip kChip = Chip::Esp32;
 #endif
+
+static int roundInt(double v) { return int(v < 0 ? v - 0.5 : v + 0.5); }
+static float round1(float v) { return roundf(v * 10.0f) / 10.0f; }
 
 // ---- request side (any task) ----------------------------------------------------------------
 
@@ -23,10 +28,22 @@ size_t DeviceRegistry::count() const {
 bool DeviceRegistry::view(size_t i, DeviceView& out) const {
   hal::CriticalSection cs;
   if (i >= n_) return false;
+  const Runtime& r = rt_[i];
   out.cfg = cfg_[i];
-  out.on = rt_[i].on;
-  out.duty = rt_[i].duty;
-  out.edges = rt_[i].edges;
+  out.on = r.on;
+  out.duty = r.duty;
+  out.edges = r.edges;
+  out.val = r.val;
+  out.longs = r.longs;
+  out.ok = r.ok;
+  out.hasHum = r.hasHum;
+  out.temp = r.temp;
+  out.hum = r.hum;
+  out.press = r.press;
+  if (cfg_[i].type == DeviceType::Serial) {
+    out.edges = serialLines_;
+    memcpy(out.text, serialLast_, kTextCap);
+  }
   return true;
 }
 
@@ -92,18 +109,73 @@ CmdErr DeviceRegistry::requestCommand(const char* id, const Command& cmd) {
   return push(op) ? CmdErr::Ok : CmdErr::QueueFull;
 }
 
+ScanErr DeviceRegistry::requestScan() {
+  hal::CriticalSection cs;
+  if (scanning_) return ScanErr::Busy;
+  if (!i2cPinsFree(kChip, cfg_, n_)) return ScanErr::PinsInUse;  // a button on the bus pins would be disturbed
+  scanReq_ = true;
+  scanning_ = true;
+  return ScanErr::Ok;
+}
+
+void DeviceRegistry::describeScan(JsonObject out) const {
+  uint8_t found[16];
+  uint8_t nf;
+  bool scanning, done;
+  {
+    hal::CriticalSection cs;
+    nf = nFound_;
+    memcpy(found, found_, sizeof found);
+    scanning = scanning_;
+    done = scanDone_;
+  }
+  out["scanning"] = scanning;
+  out["done"] = done;
+  out["sda"] = i2cSda(kChip);
+  out["scl"] = i2cScl(kChip);
+  JsonArray arr = out["found"].to<JsonArray>();
+  for (uint8_t i = 0; i < nf; i++) {
+    JsonObject o = arr.add<JsonObject>();
+    o["addr"] = found[i];
+    o["name"] = i2cKnownName(found[i]);
+  }
+}
+
 void DeviceRegistry::describeState(const DeviceView& v, JsonObject st) {
   switch (v.cfg.type) {
     case DeviceType::Relay: st["on"] = v.on; break;
-    case DeviceType::Input: st["active"] = v.on; st["edges"] = v.edges; break;
-    default: st["duty"] = v.duty; break;
+    case DeviceType::Input:
+      st["active"] = v.on;
+      st["edges"] = v.edges;
+      if (v.cfg.longMs) st["long_presses"] = v.longs;
+      break;
+    case DeviceType::Pwm: st["duty"] = v.duty; break;
+    case DeviceType::Motor: st["speed"] = v.val; break;
+    case DeviceType::Servo: st["angle"] = v.val; break;
+    case DeviceType::Sensor:
+      st["ok"] = v.ok;
+      if (v.ok) {
+        st["temp_c"] = v.temp;
+        if (v.cfg.model == 1) {
+          st["pressure_hpa"] = v.press;
+          if (v.hasHum) st["humidity"] = v.hum;
+        }
+      }
+      break;
+    case DeviceType::Serial:
+      st["rx_lines"] = v.edges;
+      st["last"] = v.text;
+      break;
   }
 }
 
 void DeviceRegistry::describe(const DeviceView& v, JsonObject out) {
   DeviceStore::toJson(v.cfg, out);
   describeState(v, out["state"].to<JsonObject>());
-  if (pinBootSensitive(kChip, v.cfg.pin)) out["boot_sensitive"] = true;
+  int8_t p[5];
+  size_t np = pinsOf(v.cfg, kChip, p);
+  for (size_t k = 0; k < np; k++)
+    if (pinBootSensitive(kChip, p[k])) { out["boot_sensitive"] = true; break; }
 }
 
 // ---- loop side (only writer) ----------------------------------------------------------------
@@ -112,6 +184,13 @@ void DeviceRegistry::begin() {
   n_ = DeviceStore::load(cfg_, kMaxDevices, kChip);
   for (size_t i = 0; i < n_; i++) startHw(i);
   Serial.printf("[dev] %u device(s) loaded\n", unsigned(n_));
+}
+
+uint8_t DeviceRegistry::allocSlot() {
+  uint8_t slot = 0;
+  while (slot < 8 && (pwmSlots_ & (1u << slot))) slot++;  // validateDevice caps PWM devices at 8
+  pwmSlots_ |= uint8_t(1u << slot);
+  return slot;
 }
 
 void DeviceRegistry::startHw(size_t i) {
@@ -128,27 +207,77 @@ void DeviceRegistry::startHw(size_t i) {
       pinMode(c.pin, c.pullup ? INPUT_PULLUP : INPUT);
       r.on = inputActive(digitalRead(c.pin) != LOW, c.invert);
       r.deb.update(r.on, millis(), c.debounceMs);  // primes: no phantom edge at boot
+      r.longDone = true;                           // a button held at boot is not a long press
       break;
-    default: {
-      uint8_t slot = 0;
-      while (slot < 8 && (pwmSlots_ & (1u << slot))) slot++;  // validateDevice caps pwm devices at 8
-      pwmSlots_ |= uint8_t(1u << slot);
-      r.slot = slot;
+    case DeviceType::Pwm:
+      r.slot = allocSlot();
       r.duty = c.initial;
-      hal::pwmAttach(c.pin, c.freqHz, slot);
-      hal::pwmWrite(c.pin, slot, pwmPermille(r.duty, c.invert));
+      hal::pwmAttach(c.pin, c.freqHz, r.slot);
+      hal::pwmWrite(c.pin, r.slot, uint16_t(pwmPermille(r.duty, c.invert)) * 10);
       break;
-    }
+    case DeviceType::Motor:  // always starts stopped
+      digitalWrite(c.pin2, LOW);
+      pinMode(c.pin2, OUTPUT);
+      if (c.pin3 >= 0) { digitalWrite(c.pin3, LOW); pinMode(c.pin3, OUTPUT); }
+      r.slot = allocSlot();
+      hal::pwmAttach(c.pin, c.freqHz, r.slot);
+      driveMotor(i);
+      break;
+    case DeviceType::Servo:
+      r.val = c.initial;
+      if (c.model == 0) {
+        r.slot = allocSlot();
+        hal::pwmAttach(c.pin, 50, r.slot);
+      } else {
+        drv::i2cStart(kChip);
+        if (!drv::pcaInit(c.i2cAddr)) Serial.printf("[dev] '%s': PCA9685 at 0x%02X did not answer\n", c.id, c.i2cAddr);
+      }
+      driveServo(i);
+      break;
+    case DeviceType::Sensor:
+      r.next = millis();
+      if (c.model == 0) r.h = drv::dsBegin(c.pin);
+      else drv::i2cStart(kChip);
+      break;
+    case DeviceType::Serial:
+      hal::uartBegin(c.pin, c.pin2, c.baud);
+      serialOn_ = true;
+      rxLen_ = 0;
+      serialLast_[0] = 0;
+      serialLines_ = 0;
+      break;
   }
 }
 
 void DeviceRegistry::stopHw(size_t i) {
   const DeviceConfig& c = cfg_[i];
+  Runtime& r = rt_[i];
   switch (c.type) {
     case DeviceType::Relay: digitalWrite(c.pin, relayPinLevel(false, c.invert)); break;  // leave it off
     case DeviceType::Pwm:
-      hal::pwmDetach(c.pin, rt_[i].slot);
-      pwmSlots_ &= uint8_t(~(1u << rt_[i].slot));
+      hal::pwmDetach(c.pin, r.slot);
+      pwmSlots_ &= uint8_t(~(1u << r.slot));
+      break;
+    case DeviceType::Motor:
+      hal::pwmDetach(c.pin, r.slot);
+      pwmSlots_ &= uint8_t(~(1u << r.slot));
+      digitalWrite(c.pin2, LOW);
+      if (c.pin3 >= 0) digitalWrite(c.pin3, LOW);
+      break;
+    case DeviceType::Servo:
+      if (c.model == 0) {
+        hal::pwmDetach(c.pin, r.slot);
+        pwmSlots_ &= uint8_t(~(1u << r.slot));
+      } else {
+        drv::pcaOff(c.i2cAddr, c.channel);
+      }
+      break;
+    case DeviceType::Sensor:
+      if (r.h) { drv::dsEnd(r.h); r.h = nullptr; }
+      break;
+    case DeviceType::Serial:
+      hal::uartEnd();
+      serialOn_ = false;
       break;
     default: break;
   }
@@ -156,7 +285,23 @@ void DeviceRegistry::stopHw(size_t i) {
 
 void DeviceRegistry::driveRelay(size_t i) { digitalWrite(cfg_[i].pin, relayPinLevel(rt_[i].on, cfg_[i].invert)); }
 void DeviceRegistry::drivePwm(size_t i) {
-  hal::pwmWrite(cfg_[i].pin, rt_[i].slot, pwmPermille(rt_[i].duty, cfg_[i].invert));
+  hal::pwmWrite(cfg_[i].pin, rt_[i].slot, uint16_t(pwmPermille(rt_[i].duty, cfg_[i].invert)) * 10);
+}
+
+void DeviceRegistry::driveMotor(size_t i) {
+  const DeviceConfig& c = cfg_[i];
+  MotorDrive d = motorDrive(rt_[i].val, c.invert, c.pin3 >= 0);
+  hal::pwmWrite(c.pin, rt_[i].slot, 0);  // drop the enable while the direction changes
+  digitalWrite(c.pin2, d.dir1);
+  if (c.pin3 >= 0) digitalWrite(c.pin3, d.dir2);
+  hal::pwmWrite(c.pin, rt_[i].slot, uint16_t(d.duty) * 100);
+}
+
+void DeviceRegistry::driveServo(size_t i) {
+  const DeviceConfig& c = cfg_[i];
+  uint16_t us = servoPulseUs(rt_[i].val, c.minUs, c.maxUs);
+  if (c.model == 0) hal::pwmWrite(c.pin, rt_[i].slot, servoDuty10k(us));
+  else drv::pcaSetUs(c.i2cAddr, c.channel, us);
 }
 
 void DeviceRegistry::doAdd(const DeviceConfig& c) {
@@ -196,22 +341,46 @@ void DeviceRegistry::doCommand(const char* id, const Command& cmd) {
   if (idx < 0) return;
   size_t i = size_t(idx);
   if (checkCommand(cfg_[i].type, cmd) != CmdErr::Ok) return;  // the device may have been replaced since queueing
-  if (cfg_[i].type == DeviceType::Relay) {
-    bool on = cmd.action == CmdAction::Toggle ? !rt_[i].on : cmd.value != 0;
-    {
-      hal::CriticalSection cs;
-      rt_[i].on = on;
-      stateVer_ = stateVer_ + 1;
+  switch (cfg_[i].type) {
+    case DeviceType::Relay: {
+      bool on = cmd.action == CmdAction::Toggle ? !rt_[i].on : cmd.value != 0;
+      {
+        hal::CriticalSection cs;
+        rt_[i].on = on;
+        stateVer_ = stateVer_ + 1;
+      }
+      driveRelay(i);
+      break;
     }
-    driveRelay(i);
-  } else {
-    uint8_t duty = uint8_t(cmd.value + 0.5);
-    {
-      hal::CriticalSection cs;
-      rt_[i].duty = duty;
-      stateVer_ = stateVer_ + 1;
+    case DeviceType::Pwm: {
+      uint8_t duty = uint8_t(cmd.value + 0.5);
+      {
+        hal::CriticalSection cs;
+        rt_[i].duty = duty;
+        stateVer_ = stateVer_ + 1;
+      }
+      drivePwm(i);
+      break;
     }
-    drivePwm(i);
+    case DeviceType::Motor:
+    case DeviceType::Servo: {
+      int v = cmd.action == CmdAction::Stop ? 0 : roundInt(cmd.value);
+      {
+        hal::CriticalSection cs;
+        rt_[i].val = int16_t(v);
+        stateVer_ = stateVer_ + 1;
+      }
+      if (cfg_[i].type == DeviceType::Motor) driveMotor(i);
+      else driveServo(i);
+      break;
+    }
+    case DeviceType::Serial: {
+      size_t len = strnlen(cmd.text, kTextCap);
+      hal::uartWrite(cmd.text, len);
+      hal::uartWrite("\n", 1);
+      break;
+    }
+    default: break;  // Input and Sensor are refused by checkCommand
   }
 }
 
@@ -219,17 +388,120 @@ void DeviceRegistry::pollInputs() {
   uint32_t now = millis();
   for (size_t i = 0; i < n_; i++) {
     if (cfg_[i].type != DeviceType::Input) continue;
+    Runtime& r = rt_[i];
     bool active = inputActive(digitalRead(cfg_[i].pin) != LOW, cfg_[i].invert);
-    if (rt_[i].deb.update(active, now, cfg_[i].debounceMs)) {
+    if (r.deb.update(active, now, cfg_[i].debounceMs)) {
       {
         hal::CriticalSection cs;
-        rt_[i].on = rt_[i].deb.stable;
-        rt_[i].edges++;
+        r.on = r.deb.stable;
+        r.edges++;
         stateVer_ = stateVer_ + 1;
       }
-      Serial.printf("[dev] '%s' %s\n", cfg_[i].id, rt_[i].on ? "active" : "inactive");
+      if (r.on) { r.pressedAt = now; r.longDone = false; }
+      Serial.printf("[dev] '%s' %s\n", cfg_[i].id, r.on ? "active" : "inactive");
+    }
+    if (cfg_[i].longMs && r.on && !r.longDone && uint32_t(now - r.pressedAt) >= cfg_[i].longMs) {
+      r.longDone = true;  // once per press
+      hal::CriticalSection cs;
+      r.longs++;
+      stateVer_ = stateVer_ + 1;
     }
   }
+}
+
+void DeviceRegistry::sensorFail(size_t i, uint32_t now) {
+  Runtime& r = rt_[i];
+  r.phase = 0;
+  r.ready = false;  // an I2C chip that lost power needs its calibration read again
+  r.next = now + uint32_t(cfg_[i].intervalS) * 1000u;
+  if (r.fails < 255) r.fails++;
+  if (r.fails >= 3 && r.ok) {  // three misses in a row: stop showing the old number
+    hal::CriticalSection cs;
+    r.ok = false;
+    stateVer_ = stateVer_ + 1;
+  }
+}
+
+void DeviceRegistry::sensorSet(size_t i, float t, float h, float p, uint32_t now) {
+  Runtime& r = rt_[i];
+  t = round1(t); h = round1(h); p = round1(p);
+  bool changed = !r.ok || t != r.temp || h != r.hum || p != r.press;
+  r.fails = 0;
+  r.phase = 0;
+  r.next = now + uint32_t(cfg_[i].intervalS) * 1000u;
+  if (!changed) return;
+  hal::CriticalSection cs;
+  r.ok = true;
+  r.temp = t; r.hum = h; r.press = p;
+  stateVer_ = stateVer_ + 1;
+}
+
+void DeviceRegistry::pollSensors() {
+  uint32_t now = millis();
+  for (size_t i = 0; i < n_; i++) {
+    if (cfg_[i].type != DeviceType::Sensor) continue;
+    const DeviceConfig& c = cfg_[i];
+    Runtime& r = rt_[i];
+    bool bme = c.model == 1;
+    if (r.phase == 0) {
+      if (int32_t(now - r.next) < 0) continue;
+      bool started;
+      if (bme) {
+        if (!r.ready) r.ready = drv::bmeBegin(c.i2cAddr, r.hasHum);
+        started = r.ready && drv::bmeTrigger(c.i2cAddr);
+      } else {
+        started = drv::dsConvert(r.h);
+      }
+      if (started) { r.phase = 1; r.t0 = now; }
+      else sensorFail(i, now);
+    } else if (uint32_t(now - r.t0) >= (bme ? 20u : 800u)) {  // BME280 x1 oversampling ~10 ms, DS18B20 12-bit 750 ms
+      float t = 0, h = 0, p = 0;
+      bool ok = bme ? drv::bmeRead(c.i2cAddr, r.hasHum, t, h, p) : drv::dsRead(r.h, t);
+      if (ok) sensorSet(i, t, h, p, now);
+      else sensorFail(i, now);
+    }
+  }
+}
+
+void DeviceRegistry::serialEmit() {
+  if (!rxLen_) return;
+  rxBuf_[rxLen_] = 0;
+  {
+    hal::CriticalSection cs;
+    memcpy(serialLast_, rxBuf_, rxLen_ + 1u);
+    serialLines_++;
+    stateVer_ = stateVer_ + 1;
+  }
+  rxLen_ = 0;
+}
+
+void DeviceRegistry::pollSerial() {
+  if (!serialOn_) return;
+  for (int budget = 64; budget > 0; budget--) {  // bounded, so a chatty device cannot starve loop()
+    int ch = hal::uartRead();
+    if (ch < 0) break;
+    if (ch == '\n' || ch == '\r') serialEmit();
+    else if (ch >= 32 && ch < 127) {              // printable ASCII only: the text goes out as JSON
+      rxBuf_[rxLen_++] = char(ch);
+      if (rxLen_ >= kTextCap - 1) serialEmit();  // an overlong line is cut into pieces
+    }
+  }
+}
+
+void DeviceRegistry::doScan() {
+  drv::i2cStart(kChip);
+  uint8_t found[16];
+  uint8_t nf = 0;
+  for (uint8_t a = 0x08; a <= 0x77; a++) {
+    if (drv::i2cProbe(a) && nf < sizeof found) found[nf++] = a;
+    yield();
+  }
+  hal::CriticalSection cs;
+  memcpy(found_, found, sizeof found);
+  nFound_ = nf;
+  scanDone_ = true;
+  scanning_ = false;
+  scanReq_ = false;
 }
 
 void DeviceRegistry::loop() {
@@ -239,7 +511,10 @@ void DeviceRegistry::loop() {
     else if (op.kind == Op::Remove) doRemove(op.id);
     else doCommand(op.id, op.cmd);
   }
+  if (scanReq_) doScan();
   pollInputs();
+  pollSensors();
+  pollSerial();
 }
 
 }  // namespace espwf

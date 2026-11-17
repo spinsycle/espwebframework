@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <LittleFS.h>
+#include <SoftwareSerial.h>
 
 namespace espwf {
 namespace hal {
@@ -36,17 +37,34 @@ CriticalSection::CriticalSection() {}   // single-threaded: callbacks only run w
 CriticalSection::~CriticalSection() {}
 
 void pwmAttach(int pin, uint32_t freqHz, uint8_t) {
-  analogWriteRange(1000);  // so duty is permille
+  analogWriteRange(10000);  // so duty is 1/10000
   analogWriteFreq(freqHz);
   pinMode(pin, OUTPUT);
 }
 
-void pwmWrite(int pin, uint8_t, uint16_t permille) { analogWrite(pin, permille); }
+void pwmWrite(int pin, uint8_t, uint16_t duty10k) { analogWrite(pin, duty10k); }
 
 void pwmDetach(int pin, uint8_t) {
   analogWrite(pin, 0);
   digitalWrite(pin, LOW);
 }
+
+static SoftwareSerial* gUart = nullptr;
+
+bool uartBegin(int rxPin, int txPin, uint32_t baud) {
+  uartEnd();
+  gUart = new SoftwareSerial(rxPin, txPin);
+  gUart->begin(baud);
+  return true;
+}
+void uartEnd() {
+  if (!gUart) return;
+  gUart->end();
+  delete gUart;
+  gUart = nullptr;
+}
+int uartRead() { return (gUart && gUart->available()) ? gUart->read() : -1; }
+void uartWrite(const char* s, size_t n) { if (gUart) gUart->write(reinterpret_cast<const uint8_t*>(s), n); }
 
 }  // namespace hal
 }  // namespace espwf

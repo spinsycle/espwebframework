@@ -47,20 +47,38 @@ static portMUX_TYPE gMux = portMUX_INITIALIZER_UNLOCKED;
 CriticalSection::CriticalSection() { portENTER_CRITICAL(&gMux); }
 CriticalSection::~CriticalSection() { portEXIT_CRITICAL(&gMux); }
 
-// 10-bit LEDC so duty maps from permille. arduino-esp32 2.x API (platform espressif32 6.9.0).
+// LEDC: a device in slot n uses channel 2n, so its timer (channel/2 % 4, per speed group) is its own and
+// devices can have different frequencies. Resolution is the finest the frequency allows, up to 14 bits.
+static uint8_t gBits[8];
+
+static inline uint8_t ledcChannel(uint8_t slot) { return uint8_t(slot * 2); }
+
 void pwmAttach(int pin, uint32_t freqHz, uint8_t slot) {
-  ledcSetup(slot, freqHz, 10);
-  ledcAttachPin(pin, slot);
+  uint8_t bits = 14;
+  while (bits > 8 && (uint64_t(freqHz) << bits) > 80000000ULL) bits--;
+  gBits[slot] = bits;
+  ledcSetup(ledcChannel(slot), freqHz, bits);
+  ledcAttachPin(pin, ledcChannel(slot));
 }
 
-void pwmWrite(int, uint8_t slot, uint16_t permille) { ledcWrite(slot, uint32_t(permille) * 1023 / 1000); }
+void pwmWrite(int, uint8_t slot, uint16_t duty10k) {
+  ledcWrite(ledcChannel(slot), uint32_t(duty10k) * ((1u << gBits[slot]) - 1) / 10000);
+}
 
 void pwmDetach(int pin, uint8_t slot) {
-  ledcWrite(slot, 0);
+  ledcWrite(ledcChannel(slot), 0);
   ledcDetachPin(pin);
   pinMode(pin, OUTPUT);
   digitalWrite(pin, LOW);
 }
+
+bool uartBegin(int rxPin, int txPin, uint32_t baud) {
+  Serial2.begin(baud, SERIAL_8N1, rxPin, txPin);
+  return true;
+}
+void uartEnd() { Serial2.end(); }
+int uartRead() { return Serial2.available() ? Serial2.read() : -1; }
+void uartWrite(const char* s, size_t n) { Serial2.write(reinterpret_cast<const uint8_t*>(s), n); }
 
 }  // namespace hal
 }  // namespace espwf

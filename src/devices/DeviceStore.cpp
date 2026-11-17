@@ -52,8 +52,45 @@ DevErr applyJson(JsonVariantConst src, DeviceConfig& cfg) {
   if (getInt(src["freq_hz"], 0, 65535, n, bad)) cfg.freqHz = uint16_t(n);
   if (bad) return DevErr::Freq;
   bad = false;
-  if (getInt(src["initial"], 0, 255, n, bad)) cfg.initial = uint8_t(n);
+  bool hasInitial = getInt(src["initial"], 0, 255, n, bad);
+  if (hasInitial) cfg.initial = uint8_t(n);
   if (bad) return DevErr::Initial;
+
+  // P4 fields. Ranges here only guard the storage type; validateDevice applies the real limits.
+  bad = false;
+  if (getInt(src["pin2"], -1, 127, n, bad)) cfg.pin2 = int8_t(n);
+  if (bad) return DevErr::Pin;
+  bad = false;
+  if (getInt(src["pin3"], -1, 127, n, bad)) cfg.pin3 = int8_t(n);
+  if (bad) return DevErr::Pin;
+  v = src["model"];
+  if (!v.isNull()) {
+    if (!v.is<const char*>() || !parseModel(cfg.type, v.as<const char*>(), cfg.model)) return DevErr::Model;
+  }
+  bad = false;
+  if (getInt(src["i2c_addr"], 0, 255, n, bad)) cfg.i2cAddr = uint8_t(n);
+  if (bad) return DevErr::I2cAddr;
+  bad = false;
+  if (getInt(src["channel"], 0, 255, n, bad)) cfg.channel = uint8_t(n);
+  if (bad) return DevErr::Channel;
+  bad = false;
+  if (getInt(src["min_us"], 0, 65535, n, bad)) cfg.minUs = uint16_t(n);
+  if (bad) return DevErr::Pulse;
+  bad = false;
+  if (getInt(src["max_us"], 0, 65535, n, bad)) cfg.maxUs = uint16_t(n);
+  if (bad) return DevErr::Pulse;
+  bad = false;
+  if (getInt(src["interval_s"], 0, 65535, n, bad)) cfg.intervalS = uint16_t(n);
+  if (bad) return DevErr::Interval;
+  bad = false;
+  if (getInt(src["long_ms"], 0, 65535, n, bad)) cfg.longMs = uint16_t(n);
+  if (bad) return DevErr::LongMs;
+  bad = false;
+  if (getInt(src["baud"], 0, 1000000, n, bad)) cfg.baud = uint32_t(n);
+  if (bad) return DevErr::Baud;
+
+  if (cfg.type == DeviceType::Servo && !hasInitial) cfg.initial = 90;  // centred, not slammed to an end stop
+  if (isI2cDevice(cfg) && cfg.i2cAddr == 0) cfg.i2cAddr = defaultI2cAddr(cfg);
 
   if (!cfg.name[0]) strcpy(cfg.name, cfg.id);  // the label defaults to the id
   return DevErr::Ok;
@@ -65,12 +102,36 @@ void toJson(const DeviceConfig& c, JsonObject out) {
   out["type"] = deviceTypeName(c.type);
   out["pin"] = c.pin;
   out["invert"] = c.invert;
-  if (c.type == DeviceType::Input) {
-    out["pullup"] = c.pullup;
-    out["debounce_ms"] = c.debounceMs;
+  switch (c.type) {
+    case DeviceType::Input:
+      out["pullup"] = c.pullup;
+      out["debounce_ms"] = c.debounceMs;
+      out["long_ms"] = c.longMs;
+      break;
+    case DeviceType::Relay: out["initial"] = c.initial; break;
+    case DeviceType::Pwm: out["freq_hz"] = c.freqHz; out["initial"] = c.initial; break;
+    case DeviceType::Motor:
+      out["pin2"] = c.pin2;
+      if (c.pin3 >= 0) out["pin3"] = c.pin3;
+      out["freq_hz"] = c.freqHz;
+      break;
+    case DeviceType::Servo:
+      out["model"] = modelName(c.type, c.model);
+      if (c.model == 1) { out["i2c_addr"] = c.i2cAddr; out["channel"] = c.channel; }
+      out["min_us"] = c.minUs;
+      out["max_us"] = c.maxUs;
+      out["initial"] = c.initial;
+      break;
+    case DeviceType::Sensor:
+      out["model"] = modelName(c.type, c.model);
+      if (c.model == 1) out["i2c_addr"] = c.i2cAddr;
+      out["interval_s"] = c.intervalS;
+      break;
+    case DeviceType::Serial:
+      out["pin2"] = c.pin2;
+      out["baud"] = c.baud;
+      break;
   }
-  if (c.type == DeviceType::Pwm) out["freq_hz"] = c.freqHz;
-  if (c.type != DeviceType::Input) out["initial"] = c.initial;
 }
 
 size_t load(DeviceConfig* out, size_t cap, Chip chip) {

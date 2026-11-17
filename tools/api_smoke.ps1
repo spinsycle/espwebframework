@@ -84,8 +84,97 @@ Check 'input listed with state' ($d -and $null -ne $d.state.active -and $d.state
 Check 'input not commandable (409)' ((Call POST '/command' @{ id = 'smoke_in'; action = 'toggle' }).code -eq 409)
 
 Write-Host '== persistence + removal'
+Write-Host '== P4 devices (nothing needs to be wired: the pins are only configured)'
+if ($Chip -eq 'esp8266') { $mEn = 13; $mDir = 16; $sRx = 0; $sTx = 15; $svoPin = 5 } else { $mEn = 26; $mDir = 14; $sRx = 32; $sTx = 33; $svoPin = 4 }
+
+$r = Call POST '/devices' @{ id = 'smoke_mot'; type = 'motor'; pin = $mEn; pin2 = $mDir }
+Check 'add motor accepted' ($r.code -eq 202)
+Settle
+Check 'motor boots stopped' ((Dev 'smoke_mot').state.speed -eq 0)
+Check 'motor set 50' ((Call POST '/command' @{ id = 'smoke_mot'; action = 'set'; value = 50 }).code -eq 202)
+Settle
+Check 'motor speed 50' ((Dev 'smoke_mot').state.speed -eq 50)
+Call POST '/command' @{ id = 'smoke_mot'; action = 'set'; value = -100 } | Out-Null
+Settle
+Check 'motor reverse full' ((Dev 'smoke_mot').state.speed -eq -100)
+Call POST '/command' @{ id = 'smoke_mot'; action = 'stop' } | Out-Null
+Settle
+Check 'motor stop' ((Dev 'smoke_mot').state.speed -eq 0)
+Check 'motor 101 rejected' ((Call POST '/command' @{ id = 'smoke_mot'; action = 'set'; value = 101 }).code -eq 400)
+Check 'motor -101 rejected' ((Call POST '/command' @{ id = 'smoke_mot'; action = 'set'; value = -101 }).code -eq 400)
+Check 'motor toggle rejected' ((Call POST '/command' @{ id = 'smoke_mot'; action = 'toggle' }).code -eq 400)
+$r = Call POST '/devices' @{ id = 'smoke_mot2'; type = 'motor'; pin = $mEn }
+Check 'motor without direction pin rejected' ($r.code -eq 400 -and $r.json.error -eq 'bad_pin')
+$r = Call POST '/devices' @{ id = 'smoke_mot2'; type = 'motor'; pin = $svoPin; pin2 = $pwmPin }  # pin2 belongs to smoke_pwm
+Check 'motor direction pin already used rejected' ($r.code -eq 400 -and $r.json.error -eq 'pin_in_use')
+
+$r = Call POST '/devices' @{ id = 'smoke_pca'; type = 'servo'; model = 'pca9685'; pin = -1; i2c_addr = 64; channel = 0 }
+Check 'add pca9685 servo accepted' ($r.code -eq 202)
+Settle
+$d = Dev 'smoke_pca'
+Check 'servo boots at 90 degrees' ($d -and $d.state.angle -eq 90 -and $d.model -eq 'pca9685')
+Call POST '/command' @{ id = 'smoke_pca'; action = 'set'; value = 20 } | Out-Null
+Settle
+Check 'servo set 20' ((Dev 'smoke_pca').state.angle -eq 20)
+Check 'servo 181 rejected' ((Call POST '/command' @{ id = 'smoke_pca'; action = 'set'; value = 181 }).code -eq 400)
+Check 'servo has no stop' ((Call POST '/command' @{ id = 'smoke_pca'; action = 'stop' }).code -eq 400)
+$r = Call POST '/devices' @{ id = 'smoke_pca2'; type = 'servo'; model = 'pca9685'; pin = -1; i2c_addr = 64; channel = 16 }
+Check 'servo channel 16 rejected' ($r.code -eq 400 -and $r.json.error -eq 'bad_channel')
+$r = Call POST '/devices' @{ id = 'smoke_pca2'; type = 'servo'; model = 'pca9685'; pin = -1; i2c_addr = 64; channel = 0 }
+Check 'same board and channel rejected' ($r.code -eq 400 -and $r.json.error -eq 'address_in_use')
+$r = Call POST '/devices' @{ id = 'smoke_pca2'; type = 'servo'; model = 'pca9685'; pin = -1; i2c_addr = 64; channel = 1 }
+Check 'second channel on the same board accepted' ($r.code -eq 202)
+Settle
+Call DELETE '/devices?id=smoke_pca2' | Out-Null
+$r = Call POST '/devices' @{ id = 'smoke_btn4'; type = 'input'; pin = $(if ($Chip -eq 'esp8266') { 4 } else { 21 }) }
+Check 'a pin on the I2C bus is refused while an I2C device exists' ($r.code -eq 400 -and $r.json.error -eq 'pin_in_use')
+
+$r = Call POST '/devices' @{ id = 'smoke_bme'; type = 'sensor'; model = 'bme280'; pin = -1; i2c_addr = 118 }
+Check 'add bme280 accepted' ($r.code -eq 202)
+Settle
+$d = Dev 'smoke_bme'
+Check 'bme280 listed with a state' ($d -and $null -ne $d.state.ok)
+Check 'sensor not commandable (409)' ((Call POST '/command' @{ id = 'smoke_bme'; action = 'set'; value = 1 }).code -eq 409)
+$r = Call POST '/devices' @{ id = 'smoke_bme2'; type = 'sensor'; model = 'bme280'; pin = -1; i2c_addr = 118 }
+Check 'second sensor on one address rejected' ($r.code -eq 400 -and $r.json.error -eq 'address_in_use')
+$r = Call POST '/devices' @{ id = 'smoke_bme2'; type = 'sensor'; model = 'bme280'; pin = -1; i2c_addr = 117 }
+Check 'bme280 address 0x75 rejected' ($r.code -eq 400 -and $r.json.error -eq 'bad_i2c_addr')
+$r = Call POST '/devices' @{ id = 'smoke_bme2'; type = 'sensor'; model = 'bme280'; pin = -1; i2c_addr = 119; interval_s = 0 }
+Check 'interval 0 rejected' ($r.code -eq 400 -and $r.json.error -eq 'bad_interval')
+$r = Call POST '/devices' @{ id = 'smoke_bme2'; type = 'sensor'; model = 'lm35'; pin = -1 }
+Check 'unknown sensor model rejected' ($r.code -eq 400 -and $r.json.error -eq 'bad_model')
+
+$s = (Call GET '/i2c')
+Check 'i2c status has the bus pins' ($s.code -eq 200 -and $s.json.sda -gt 0 -and $s.json.scl -gt 0)
+
+$r = Call POST '/devices' @{ id = 'smoke_ser'; type = 'serial'; pin = $sRx; pin2 = $sTx; baud = 12345 }
+Check 'odd baud rejected' ($r.code -eq 400 -and $r.json.error -eq 'bad_baud')
+$r = Call POST '/devices' @{ id = 'smoke_ser'; type = 'serial'; pin = $sRx; pin2 = $sTx; baud = 9600 }
+Check 'add serial accepted' ($r.code -eq 202)
+Settle
+$d = Dev 'smoke_ser'
+Check 'serial listed with state' ($d -and $d.state.rx_lines -eq 0 -and $d.state.last -eq '')
+Check 'serial send accepted' ((Call POST '/command' @{ id = 'smoke_ser'; action = 'send'; value = 'hello' }).code -eq 202)
+Check 'serial empty line rejected' ((Call POST '/command' @{ id = 'smoke_ser'; action = 'send'; value = '' }).code -eq 400)
+Check 'serial 48 characters rejected' ((Call POST '/command' @{ id = 'smoke_ser'; action = 'send'; value = ('a' * 48) }).code -eq 400)
+Check 'serial 47 characters accepted' ((Call POST '/command' @{ id = 'smoke_ser'; action = 'send'; value = ('a' * 47) }).code -eq 202)
+Check 'serial set rejected' ((Call POST '/command' @{ id = 'smoke_ser'; action = 'set'; value = 1 }).code -eq 400)
+Check 'serial number rejected' ((Call POST '/command' @{ id = 'smoke_ser'; action = 'send'; value = 5 }).code -eq 400)
+$r = Call POST '/devices' @{ id = 'smoke_ser2'; type = 'serial'; pin = $svoPin; pin2 = $mDir; baud = 9600 }
+Check 'a second serial device rejected' ($r.code -eq 400 -and $r.json.error -eq 'too_many_serial')
+
+# a direct-pin servo needs 50 Hz: the ESP8266 has one PWM frequency (smoke_pwm runs at 1000 Hz), the ESP32 does not
+$r = Call POST '/devices' @{ id = 'smoke_svo'; type = 'servo'; pin = $svoPin }
+if ($Chip -eq 'esp8266') {
+  Check 'direct servo beside a 1000 Hz pwm rejected on esp8266' ($r.code -eq 400 -and $r.json.error -eq 'freq_conflict')
+} else {
+  Check 'direct servo beside a 1000 Hz pwm accepted on esp32' ($r.code -eq 202)
+  Settle
+  Call DELETE '/devices?id=smoke_svo' | Out-Null
+}
+
 Check 'delete unknown 404' ((Call DELETE '/devices?id=smoke_nope').code -eq 404)
-foreach ($id in 'smoke_led', 'smoke_pwm', 'smoke_in') {
+foreach ($id in 'smoke_led', 'smoke_pwm', 'smoke_in', 'smoke_mot', 'smoke_pca', 'smoke_bme', 'smoke_ser') {
   Check "delete $id" ((Call DELETE "/devices?id=$id").code -eq 202)
 }
 Settle
