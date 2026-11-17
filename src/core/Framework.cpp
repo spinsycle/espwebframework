@@ -32,7 +32,8 @@ bool FrameworkController::begin() {
   }
   net_.begin(cfg);
   automation_.begin(devices_, net_);
-  http_.begin(*this, net_, devices_, ws_, automation_);
+  auth_.begin();
+  http_.begin(*this, net_, devices_, ws_, automation_, auth_);
   Serial.printf("[espwf] ready, AP '%s'\n", cfg.apSsid);
   return true;
 }

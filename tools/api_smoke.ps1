@@ -1,12 +1,16 @@
 ﻿# Exercises the device REST API on a live board. Usage: tools\api_smoke.ps1 -Ip 192.168.4.23 [-Chip esp8266|esp32]
 # Adds and removes devices named smoke_*; it leaves nothing behind (and refuses to run if a smoke_* device exists).
-param([Parameter(Mandatory)][string]$Ip, [ValidateSet('esp8266', 'esp32')][string]$Chip = 'esp8266')
+param([Parameter(Mandatory)][string]$Ip, [ValidateSet('esp8266', 'esp32')][string]$Chip = 'esp8266',
+      [string]$Password = 'espframework', [string]$NewPassword = '', [switch]$Ota)
 $ErrorActionPreference = 'Stop'
 $script:fail = 0
 $script:pass = 0
 
-function Call($method, $path, $body) {
+$script:token = ''
+function CallAs($token, $method, $path, $body, $cookie = '') {
   $args = @{ UseBasicParsing = $true; Method = $method; Uri = "http://$Ip/api/v1$path"; TimeoutSec = 20 }
+  if ($token) { $args.Headers = @{ Authorization = "Bearer $token" } }
+  if ($cookie) { $args.Headers = @{ Cookie = $cookie } }
   if ($body) { $args.Body = ($body | ConvertTo-Json -Compress -Depth 8); $args.ContentType = 'application/json' }
   try {
     $r = Invoke-WebRequest @args
@@ -18,6 +22,7 @@ function Call($method, $path, $body) {
     return @{ code = [int]$resp.StatusCode; json = ($(if ($t) { $t | ConvertFrom-Json } else { $null })) }
   }
 }
+function Call($method, $path, $body) { CallAs $script:token $method $path $body }
 function Check($name, $cond) {
   if ($cond) { $script:pass++; Write-Host "  ok   $name" } else { $script:fail++; Write-Host "  FAIL $name" -ForegroundColor Red }
 }
@@ -25,6 +30,20 @@ function Settle { Start-Sleep -Milliseconds 700 }   # queued ops apply on the ne
 # Waits (up to 10 s) until no smoke_* device is left.
 function WaitGone { for ($i = 0; $i -lt 20; $i++) { Start-Sleep -Milliseconds 500; if (-not ((Call GET '/devices').json.devices | Where-Object { $_.id -like 'smoke_*' })) { return } } }
 function Dev($id) { (Call GET '/devices').json.devices | Where-Object { $_.id -eq $id } }
+
+
+# ---- sign in (the board asks for a password on everything under /api/)
+$lg = CallAs '' POST '/session' @{ password = $Password }
+if ($lg.code -eq 429) { Write-Host "Locked out for $($lg.json.retry_s) s after wrong passwords. Wait and retry."; exit 2 }
+if ($lg.code -ne 200) { Write-Host "Login failed (HTTP $($lg.code)). Pass the board's password with -Password."; exit 2 }
+$script:token = $lg.json.token
+if ($lg.json.must_change) {
+  if (-not $NewPassword) { Write-Host 'The board still has the factory password. Pass -NewPassword <8-32 characters> to set one now, or change it in the System tab.'; exit 2 }
+  $pc = Call PUT '/password' @{ current = $Password; password = $NewPassword }
+  if ($pc.code -ne 200) { Write-Host "Could not set the new password: $($pc.json.error)"; exit 2 }
+  $Password = $NewPassword
+  Write-Host '  (factory password replaced with -NewPassword)'
+}
 
 # Pins that are safe to claim on a bare dev board (nothing needs to be wired).
 if ($Chip -eq 'esp8266') { $relayPin = 2; $pwmPin = 14; $inPin = 12; $reservedPin = 7; $badPin = 17 }
@@ -574,6 +593,143 @@ Check 'delete of an unknown sequence is 404' ((Call DELETE '/automation/sequence
 Check 'delete of an unknown timer is 404' ((Call DELETE '/automation/timers?id=smoke_nope').code -eq 404)
 foreach ($id in 'smoke_sr', 'smoke_sp') { Call DELETE "/devices?id=$id" | Out-Null }
 WaitGone
+
+
+Write-Host '== P8a security (the 5-miss lock-out is tested last and costs a 31 s wait)'
+function Anon($method, $path, $body) { CallAs '' $method $path $body }
+function Page($path) { try { (Invoke-WebRequest -UseBasicParsing -TimeoutSec 20 "http://$Ip$path").StatusCode } catch { [int]$_.Exception.Response.StatusCode } }
+
+Check 'the page itself loads without a login' ((Page '/') -eq 200)
+Check 'the page scripts load without a login' ((Page '/app.js') -eq 200)
+$ss = Anon GET '/session'
+Check 'GET /session without a token says not authenticated' ($ss.code -eq 200 -and $ss.json.authenticated -eq $false)
+$ss = Call GET '/session'
+Check 'GET /session with the token says authenticated' ($ss.json.authenticated -eq $true -and $ss.json.must_change -eq $false)
+
+foreach ($p in '/system', '/status', '/devices', '/network', '/config/export', '/dashboard', '/dashboard/schema', '/automation', '/automation/status', '/automation/schema', '/automation/timers', '/i2c') {
+  Check "no login: GET $p is 401" ((Anon GET $p).code -eq 401)
+}
+# Writes with harmless bodies: if one got through it would answer 400 or 404, not 401, and change nothing.
+Check 'no login: POST /command is 401' ((Anon POST '/command' @{ id = 'x'; action = 'toggle' }).code -eq 401)
+Check 'no login: POST /devices is 401' ((Anon POST '/devices' @{ id = 'x'; type = 'nope' }).code -eq 401)
+Check 'no login: PUT /devices is 401' ((Anon PUT '/devices' @{ id = 'x' }).code -eq 401)
+Check 'no login: DELETE /devices is 401' ((Anon DELETE '/devices?id=nope').code -eq 401)
+Check 'no login: PUT /network is 401' ((Anon PUT '/network' @{ mode = 'nope' }).code -eq 401)
+Check 'no login: PUT /dashboard is 401' ((Anon PUT '/dashboard' @{ mode = 'nope' }).code -eq 401)
+Check 'no login: POST /config/import is 401' ((Anon POST '/config/import' @{ schema_version = 99; devices = @() }).code -eq 401)
+Check 'no login: POST /config/factory-reset is 401' ((Anon POST '/config/factory-reset' @{ confirm = 'no' }).code -eq 401)
+Check 'no login: PUT /automation/settings is 401' ((Anon PUT '/automation/settings' @{ utc_offset_min = 9999 }).code -eq 401)
+Check 'no login: POST /automation/rules is 401' ((Anon POST '/automation/rules' @{ id = 'Bad Id' }).code -eq 401)
+Check 'no login: POST /automation/sequences/start is 401' ((Anon POST '/automation/sequences/start?id=nope').code -eq 401)
+Check 'no login: POST /automation/timers/start is 401' ((Anon POST '/automation/timers/start?id=nope').code -eq 401)
+Check 'no login: PUT /password is 401' ((Anon PUT '/password' @{ current = 'x'; password = 'y' }).code -eq 401)
+Check 'no login: POST /system/restart is 401' ((Anon POST '/system/restart').code -eq 401)
+
+Check 'a made-up token is refused' ((CallAs ('0' * 32) GET '/devices').code -eq 401)
+Check 'a token of the wrong length is refused' ((CallAs 'abc' GET '/devices').code -eq 401)
+Check 'the session cookie works too' ((CallAs '' GET '/devices' $null "sid=$($script:token)").code -eq 200)
+Check 'among other cookies' ((CallAs '' GET '/devices' $null "theme=dark; sid=$($script:token); x=1").code -eq 200)
+Check 'a cookie whose name only ends in sid is ignored' ((CallAs '' GET '/devices' $null "xsid=$($script:token)").code -eq 401)
+
+$bad = Anon POST '/session' @{ password = 'definitely-wrong' }
+Check 'a wrong password is refused' ($bad.code -eq 401 -and $bad.json.error -eq 'bad_credentials')
+Check 'a missing password is refused' ((Anon POST '/session' @{ nothing = 1 }).code -eq 401)
+
+# a second session, then logging it out
+$l2 = Anon POST '/session' @{ password = $Password }
+$t2 = $l2.json.token
+Check 'a second login gives a second session' ($l2.code -eq 200 -and $t2 -and $t2 -ne $script:token)
+Check 'both sessions work' ((CallAs $t2 GET '/devices').code -eq 200 -and (Call GET '/devices').code -eq 200)
+$out = CallAs $t2 DELETE '/session'
+Check 'logout accepted' ($out.code -eq 200)
+Check 'a logged-out token stops working' ((CallAs $t2 GET '/devices').code -eq 401)
+Check 'the other session is untouched' ((Call GET '/devices').code -eq 200)
+
+# changing the password
+$old = $script:token
+$l3 = Anon POST '/session' @{ password = $Password }
+$other = $l3.json.token
+Check 'password change: wrong current is refused' ((Call PUT '/password' @{ current = 'not-it-at-all'; password = 'smoke-temp-pw1' }).json.error -eq 'wrong_password')
+Check 'password change: too short is refused' ((Call PUT '/password' @{ current = $Password; password = 'short' }).json.error -eq 'weak_password')
+Check 'password change: the factory password is refused' ((Call PUT '/password' @{ current = $Password; password = 'espframework' }).json.error -eq 'default_password')
+Check 'password change: 33 characters is refused' ((Call PUT '/password' @{ current = $Password; password = ('x' * 33) }).json.error -eq 'weak_password')
+$tmp = 'smoke-temp-pw1'
+$ch = Call PUT '/password' @{ current = $Password; password = $tmp }
+Check 'password change accepted' ($ch.code -eq 200)
+if ($ch.code -eq 200) {
+  Check 'the session that changed it stays signed in' ((Call GET '/devices').code -eq 200)
+  Check 'every other session was signed out' ((CallAs $other GET '/devices').code -eq 401)
+  Check 'the old password no longer works' ((Anon POST '/session' @{ password = $Password }).code -eq 401)
+  $ln = Anon POST '/session' @{ password = $tmp }
+  Check 'the new password works' ($ln.code -eq 200)
+  $back = CallAs $ln.json.token PUT '/password' @{ current = $tmp; password = $Password }
+  if ($back.code -ne 200) { Write-Host "  !! COULD NOT RESTORE THE PASSWORD. The board's password is now: $tmp" -ForegroundColor Red }
+  Check 'the original password was restored' ($back.code -eq 200)
+  $l4 = Anon POST '/session' @{ password = $Password }
+  $script:token = $l4.json.token
+  Check 'and works again' ($l4.code -eq 200)
+}
+
+# firmware update: refusals (nothing here can change what runs)
+Add-Type -AssemblyName System.Net.Http
+function PostFile($token, $name, [byte[]]$bytes, $query = '') {
+  $hc = New-Object System.Net.Http.HttpClient
+  $hc.Timeout = [TimeSpan]::FromSeconds(120)
+  if ($token) { $hc.DefaultRequestHeaders.Add('Authorization', "Bearer $token") }
+  $mp = New-Object System.Net.Http.MultipartFormDataContent
+  $fc = New-Object System.Net.Http.ByteArrayContent(, $bytes)
+  $mp.Add($fc, 'firmware', $name)
+  try {
+    $resp = $hc.PostAsync("http://$Ip/api/v1/system/update$query", $mp).Result
+    $txt = $resp.Content.ReadAsStringAsync().Result
+    return @{ code = [int]$resp.StatusCode; json = ($(try { $txt | ConvertFrom-Json } catch { $null })) }
+  } finally { $hc.Dispose() }
+}
+$junk = [byte[]](1..2000 | ForEach-Object { $_ % 256 })
+Check 'firmware: no login is refused' ((PostFile '' 'x.bin' $junk).code -eq 401)
+$r = PostFile $script:token 'notes.txt' $junk
+Check 'firmware: a file that is not .bin is refused' ($r.code -eq 400 -and $r.json.error -eq 'update_failed')
+$r = PostFile $script:token 'x.bin' $junk
+Check 'firmware: a file with no image header is refused' ($r.code -eq 400 -and $r.json.error -eq 'update_failed')
+$fake = [byte[]](@(0xE9) + (1..3000 | ForEach-Object { ($_ * 7) % 256 }))
+$r = PostFile $script:token 'x.bin' $fake '?md5=00000000000000000000000000000000'
+Check 'firmware: an image whose checksum is wrong is refused' ($r.code -eq 400 -and $r.json.error -eq 'update_failed')
+Check 'the board still answers after the refused updates' ((Call GET '/status').code -eq 200)
+
+# lock-out last
+foreach ($i in 1..5) { $null = Anon POST '/session' @{ password = 'wrong-on-purpose' } }
+$lk = Anon POST '/session' @{ password = $Password }
+Check 'five wrong passwords lock the login (even the right one waits)' ($lk.code -eq 429 -and $lk.json.retry_s -ge 1)
+Check 'a session that already exists is not affected by the lock-out' ((Call GET '/devices').code -eq 200)
+Start-Sleep -Seconds 32
+$lk = Anon POST '/session' @{ password = $Password }
+Check 'after 30 s the login is open again' ($lk.code -eq 200)
+$script:token = $lk.json.token
+
+
+if ($Ota) {
+  Write-Host '== firmware update (-Ota): installs the firmware built in .pio, then the board restarts'
+  $fw = Join-Path (Split-Path $PSScriptRoot -Parent) ".pio\build\$(if ($Chip -eq 'esp8266') { 'nodemcuv2' } else { 'esp32dev' })\firmware.bin"
+  if (-not (Test-Path $fw)) { Write-Host "  no firmware at ${fw} - build it first"; $script:fail++ }
+  else {
+    $bytes = [System.IO.File]::ReadAllBytes($fw)
+    $md5 = [BitConverter]::ToString((New-Object System.Security.Cryptography.MD5CryptoServiceProvider).ComputeHash($bytes)).Replace('-', '').ToLower()
+    $up0 = (Call GET '/status').json.uptime_s
+    $r = PostFile $script:token 'firmware.bin' $bytes "?md5=$md5"
+    Check 'firmware installed' ($r.code -eq 200 -and $r.json.ok -eq $true)
+    if ($r.code -eq 200) {
+      Start-Sleep -Seconds 25
+      $back = $null
+      foreach ($i in 1..40) { try { $back = Anon GET '/session'; if ($back.code -eq 200) { break } } catch { }; Start-Sleep -Seconds 3 }
+      Check 'the board comes back after the update' ($back -and $back.code -eq 200)
+      $l = Anon POST '/session' @{ password = $Password }
+      $script:token = $l.json.token
+      $up1 = (Call GET '/status').json.uptime_s
+      Check 'it restarted (uptime went back)' ($up1 -lt $up0 -or $up1 -lt 120)
+      Check 'and it still works' ((Call GET '/devices').code -eq 200)
+    }
+  }
+}
 
 Write-Host ("`n{0} passed, {1} failed" -f $script:pass, $script:fail)
 exit ([int]($script:fail -gt 0))

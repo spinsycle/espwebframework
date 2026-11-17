@@ -9,8 +9,27 @@
 <body>
 <header>
   <strong id="devname">ESP CONTROL</strong>
-  <span id="online" class="dot off" title="offline"></span>
+  <span class="hdr"><button type="button" id="logout" class="linkbtn" hidden>Log out</button> <span id="online" class="dot off" title="offline"></span></span>
 </header>
+<div id="gate" hidden>
+  <form id="loginform" autocomplete="on">
+    <h2 id="gatename">Sign in</h2>
+    <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+    <button type="submit">Sign in</button>
+    <p id="loginmsg" role="status"></p>
+    <small class="hint">A fresh or factory-reset board uses the password <b>espframework</b> and asks you to change it straight away.</small>
+  </form>
+  <form id="pwform" autocomplete="off" hidden>
+    <h2>Change password</h2>
+    <label>Current password <input name="current" type="password" autocomplete="current-password"></label>
+    <label>New password (8 to 32 characters) <input name="password" type="password" minlength="8" maxlength="32" autocomplete="new-password"></label>
+    <label>New password again <input name="again" type="password" minlength="8" maxlength="32" autocomplete="new-password"></label>
+    <button type="submit">Change password</button>
+    <button type="button" id="pwcancel">Cancel</button>
+    <p id="pwmsg" role="status"></p>
+    <small class="hint">Changing it signs every other browser out. If you lose it, a factory reset (hold the board's reset path in the System tab while signed in, or re-flash the filesystem) brings back the factory password.</small>
+  </form>
+</div>
 <nav id="tabs">
   <button data-tab="dash" class="on">Dashboard</button>
   <button data-tab="dev">Devices</button>
@@ -223,6 +242,19 @@
 
   <section id="sys" hidden>
     <div class="card"><dl id="sysinfo"></dl></div>
+    <div class="card" id="seccard">
+      <h3>Security</h3>
+      <p class="hint">Everything on this board needs the password. Sessions end after an hour without use.</p>
+      <button type="button" id="pwopen">Change password</button>
+    </div>
+    <div class="card" id="fwcard">
+      <h3>Firmware update</h3>
+      <p class="hint">Choose the <code>firmware.bin</code> built for this chip. The board checks it, installs it and restarts; if anything is wrong it keeps the old firmware.</p>
+      <label>Firmware file <input id="fwfile" type="file" accept=".bin"></label>
+      <progress id="fwbar" max="100" value="0" hidden></progress>
+      <button type="button" id="fwgo">Install</button>
+      <p id="fwmsg" role="status"></p>
+    </div>
     <div class="card" id="cfgcard">
       <h3>Configuration</h3>
       <p class="hint">Export saves the device list (not Wi-Fi passwords). Import replaces every device and restarts the board.</p>
@@ -235,6 +267,7 @@
     <button id="restart" type="button" class="danger">Restart device</button>
   </section>
 </main>
+<script src="security.js"></script>
 <script src="app.js"></script>
 <script src="dash.js"></script>
 <script src="automation.js"></script>

@@ -26,6 +26,7 @@ class FrameworkController;
 namespace espwf {
 
 class DeviceRegistry;
+class AuthManager;
 
 class WsHub {
  public:
@@ -34,7 +35,7 @@ class WsHub {
   static constexpr uint32_t kStatusEveryMs = 2000;
   static constexpr size_t kMaxMsgBytes = 256;
 
-  void attach(AsyncWebServer& server, FrameworkController& fw, DeviceRegistry& devices);
+  void attach(AsyncWebServer& server, FrameworkController& fw, DeviceRegistry& devices, AuthManager& auth);
   void loop();
   size_t clientCount() const;
 
@@ -43,6 +44,7 @@ class WsHub {
     uint32_t id = 0;  // 0 = free
     RateLimiter limiter;
     bool warned = false;
+    char tok[33] = {0};  // the session this socket was opened with
   };
   struct Last {
     bool on = false;
@@ -58,6 +60,8 @@ class WsHub {
   AsyncWebSocket* ws_ = nullptr;
   FrameworkController* fw_ = nullptr;
   DeviceRegistry* dev_ = nullptr;
+  AuthManager* auth_ = nullptr;
+  uint32_t nextAuthCheck_ = 0;
   Slot slots_[kMaxClients + 1];
   Last last_[kMaxDevices];
   uint32_t seenState_ = 0, seenStruct_ = 0;

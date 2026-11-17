@@ -48,5 +48,8 @@ void uartWrite(const char* s, size_t n);
 void clockBegin();
 uint32_t epochUtc();
 
+// Bytes from the chip's hardware random number generator (session tokens, password salts).
+void randomBytes(uint8_t* out, size_t n);
+
 }  // namespace hal
 }  // namespace espwf

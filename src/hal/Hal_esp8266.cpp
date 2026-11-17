@@ -70,6 +70,13 @@ void uartWrite(const char* s, size_t n) { if (gUart) gUart->write(reinterpret_ca
 void clockBegin() { configTime(0, 0, "pool.ntp.org", "time.nist.gov"); }  // the offset is applied by the automation engine
 uint32_t epochUtc() { return uint32_t(time(nullptr)); }
 
+void randomBytes(uint8_t* out, size_t n) {
+  for (size_t i = 0; i < n; i += 4) {
+    uint32_t r = ESP.random();  // the hardware RNG register
+    for (size_t k = 0; k < 4 && i + k < n; k++) out[i + k] = uint8_t(r >> (8 * k));
+  }
+}
+
 }  // namespace hal
 }  // namespace espwf
 #endif  // ESP8266

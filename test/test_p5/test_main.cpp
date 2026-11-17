@@ -33,7 +33,7 @@ void test_schema_check() {
 // ---- factory reset list
 
 void test_config_files_listed() {
-  EQ(12, kConfigFileCount);
+  EQ(14, kConfigFileCount);
   TEST_ASSERT_TRUE(isConfigFile("/config/network.json"));
   TEST_ASSERT_TRUE(isConfigFile("/config/network.json.tmp"));
   TEST_ASSERT_TRUE(isConfigFile("/config/devices.json"));
@@ -43,6 +43,8 @@ void test_config_files_listed() {
   TEST_ASSERT_TRUE(isConfigFile("/config/dashboard.json"));
   TEST_ASSERT_TRUE(isConfigFile("/config/dashboard.json.tmp"));
   TEST_ASSERT_TRUE(isConfigFile("/config/dashboard.json.bak"));
+  TEST_ASSERT_TRUE(isConfigFile("/config/security.json"));
+  TEST_ASSERT_TRUE(isConfigFile("/config/security.json.tmp"));
   TEST_ASSERT_FALSE(isConfigFile("/config/other.json"));
   TEST_ASSERT_FALSE(isConfigFile("/www/index.html"));  // the UI must survive a factory reset
   TEST_ASSERT_FALSE(isConfigFile(""));

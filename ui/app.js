@@ -5,6 +5,8 @@ const API = "/api/v1";
 async function api(path, opts) {
   const r = await fetch(API + path, opts);
   const j = await r.json().catch(() => ({}));
+  if (r.status === 401) authFail();                                   // the session ended: back to the login form
+  else if (r.status === 403 && j.error === "password_change_required") showGate("change", true);
   if (!r.ok) throw Object.assign(new Error(j.error || r.statusText), { field: j.field, body: j });
   return j;
 }
@@ -73,6 +75,7 @@ function connectWs() {
   };
   sock.onclose = () => {
     if (ws === sock) { ws = null; wsLive = false; wsBuf = null; }
+    if (!authed) return;                                              // no session: the login form is up, do not keep knocking
     setTimeout(connectWs, wsRetryMs);
     wsRetryMs = Math.min(wsRetryMs * 2, 5000);  // back off, but never wait long: the board may be restarting
   };
@@ -420,6 +423,8 @@ $("restart").addEventListener("click", async () => {
   if (confirm("Restart the device?")) await api("/system/restart", { method: "POST" }).catch(() => {});
 });
 
-api("/system").then((s) => ($("devname").textContent = s.device.name)).catch(() => {});
-connectWs();
-poll();
+authBoot(() => {
+  api("/system").then((s) => ($("devname").textContent = s.device.name)).catch(() => {});
+  connectWs();
+  poll();
+});

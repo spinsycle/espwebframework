@@ -7,6 +7,8 @@
 #include "core/Framework.h"
 #include "devices/CommandJson.h"
 #include "devices/DeviceRegistry.h"
+#include "net/Token.h"
+#include "security/AuthManager.h"
 
 namespace espwf {
 
@@ -18,7 +20,8 @@ WsHub::Slot* WsHub::slotFor(uint32_t id) {
   return nullptr;
 }
 
-void WsHub::attach(AsyncWebServer& server, FrameworkController& fw, DeviceRegistry& devices) {
+void WsHub::attach(AsyncWebServer& server, FrameworkController& fw, DeviceRegistry& devices, AuthManager& auth) {
+  auth_ = &auth;
   fw_ = &fw;
   dev_ = &devices;
   ws_ = new AsyncWebSocket("/ws");  // lives for the whole program, like the server
@@ -26,14 +29,22 @@ void WsHub::attach(AsyncWebServer& server, FrameworkController& fw, DeviceRegist
     switch (type) {
       case WS_EVT_CONNECT:
         if (ws_->count() > kMaxClients) { c->close(1013, "busy"); break; }  // the newest client is the one refused
-        if (Slot* s = slotFor(0)) { *s = Slot(); s->id = c->id(); }
+        if (Slot* s = slotFor(0)) {
+          *s = Slot();
+          s->id = c->id();
+          if (arg) tokenFrom(static_cast<AsyncWebServerRequest*>(arg), s->tok);  // the handshake carried the session
+        }
         c->text("{\"event\":\"hello\",\"proto\":1}");
         break;
       case WS_EVT_DISCONNECT:
         if (Slot* s = slotFor(c->id())) s->id = 0;
         break;
-      case WS_EVT_DATA:
+      case WS_EVT_DATA: {
+        Slot* s = slotFor(c->id());
+        if (!s || !auth_->valid(s->tok)) { c->close(1008, "login required"); break; }  // valid() also renews: a busy socket keeps its session
         onData(c, arg, data, len);
+        break;
+      }
         break;
       default: break;
     }
@@ -110,6 +121,14 @@ void WsHub::scanStates(bool send) {
 void WsHub::loop() {
   if (!ws_) return;
   ws_->cleanupClients(kMaxClients);
+  uint32_t t = millis();
+  if (int32_t(t - nextAuthCheck_) >= 0) {  // a session that ended (expired, logged out, password changed) closes its sockets
+    nextAuthCheck_ = t + 3000;
+    for (Slot& s : slots_)
+      if (s.id && !auth_->alive(s.tok)) {
+        if (AsyncWebSocketClient* c = ws_->client(s.id)) c->close(1008, "session ended");
+      }
+  }
   bool anyone = ws_->count() > 0;
   if (anyone && !ws_->availableForWriteAll()) return;  // a client's send queue is full: try again next pass, lose nothing
 

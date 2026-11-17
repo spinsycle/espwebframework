@@ -511,6 +511,98 @@ DASH_TIMER = [
     ("timer device text", "  if (need == Need::Timer) return (text(c.device, kIdCap, false) && timerFind && timerFind(tctx, c.device)) ? DashErr::Ok : DashErr::Device;", "  if (need == Need::Timer) return (timerFind && timerFind(tctx, c.device)) ? DashErr::Ok : DashErr::Device;"),
 ]
 
+# P8a: login (password hash, sessions, lock-out) and SHA-256.
+AUTH = [
+    ("eq accumulates", "d |= uint8_t(a[i] ^ b[i]);", "d = uint8_t(a[i] ^ b[i]);"),
+    ("eq result", "  return d == 0;\n}\n\ninline void toHex", "  return d != 0;\n}\n\ninline void toHex"),
+    ("hex digits", 'static const char* h = "0123456789abcdef";', 'static const char* h = "0123456789abcdeg";'),
+    ("hex high nibble", "out[2 * i] = h[in[i] >> 4];", "out[2 * i] = h[in[i] & 15];"),
+    ("fromhex length", "  if (strlen(s) != 2 * n) return false;", "  if (strlen(s) < 2 * n) return false;"),
+    ("fromhex lower", "(c >= 'a' && c <= 'f') ? c - 'a' + 10", "(c >= 'a' && c <= 'f') ? c - 'a' + 9"),
+    ("fromhex upper", "(c >= 'A' && c <= 'F') ? c + 10 - 'A' : -1;", "(c >= 'A' && c <= 'F') ? c + 9 - 'A' : -1;"),
+    ("fromhex digit", "int d = (c >= '0' && c <= '9') ? c - '0'", "int d = (c >= '1' && c <= '9') ? c - '0'"),
+    ("fromhex reject", "      if (d < 0) return false;", ""),
+    ("fromhex combine", "      v = v * 16 + d;", "      v = v * 15 + d;"),
+    ("policy min", "  if (n < kMinPassword || n > kMaxPassword) return AuthErr::Policy;", "  if (n > kMaxPassword) return AuthErr::Policy;"),
+    ("policy max", "  if (n < kMinPassword || n > kMaxPassword) return AuthErr::Policy;", "  if (n < kMinPassword) return AuthErr::Policy;"),
+    ("policy printable low", "    if (uint8_t(pw[i]) < 0x20 || uint8_t(pw[i]) > 0x7E) return AuthErr::Policy;", "    if (uint8_t(pw[i]) < 0x1F || uint8_t(pw[i]) > 0x7E) return AuthErr::Policy;"),
+    ("policy printable high", "    if (uint8_t(pw[i]) < 0x20 || uint8_t(pw[i]) > 0x7E) return AuthErr::Policy;", "    if (uint8_t(pw[i]) < 0x20 || uint8_t(pw[i]) > 0x7F) return AuthErr::Policy;"),
+    ("policy default", "  if (!strcmp(pw, kDefaultPassword)) return AuthErr::SameAsDefault;", ""),
+    ("hash length cap", "  if (pl > kMaxPassword) pl = kMaxPassword;", ""),
+    ("hash first salt", "  s.update(salt, kSaltBytes);\n  s.update(reinterpret_cast<const uint8_t*>(pw), pl);\n  s.final(out);\n  for", "  s.update(reinterpret_cast<const uint8_t*>(pw), pl);\n  s.final(out);\n  for"),
+    ("hash rounds", "  for (uint16_t i = 0; i < rounds; i++) {", "  for (uint16_t i = 0; i < rounds + 1; i++) {"),
+    ("hash feeds back", "    s.update(out, 32);\n    s.update(salt, kSaltBytes);", "    s.update(salt, kSaltBytes);"),
+    ("hash round salt", "    s.update(out, 32);\n    s.update(salt, kSaltBytes);\n", "    s.update(out, 32);\n"),
+    ("hash round password", "    s.update(salt, kSaltBytes);\n    s.update(reinterpret_cast<const uint8_t*>(pw), pl);\n    s.final(out);\n  }", "    s.update(salt, kSaltBytes);\n    s.final(out);\n  }"),
+    ("must change", "  bool mustChange() const { return !custom_; }", "  bool mustChange() const { return custom_; }"),
+    ("set policy", "    AuthErr e = passwordPolicy(pw);\n    if (e != AuthErr::Ok) return e;\n    memcpy(salt_, salt, kSaltBytes);", "    memcpy(salt_, salt, kSaltBytes);"),
+    ("set rounds", "    rounds_ = kHashRounds;\n    hashPassword(pw, salt_, rounds_, hash_);", "    rounds_ = 1;\n    hashPassword(pw, salt_, rounds_, hash_);"),
+    ("set custom", "    custom_ = true;\n    return AuthErr::Ok;", "    return AuthErr::Ok;"),
+    ("load custom", "    rounds_ = rounds;\n    custom_ = true;\n  }", "    rounds_ = rounds;\n  }"),
+    ("default exact", "      return strlen(pw) == n && constTimeEq(reinterpret_cast<const uint8_t*>(pw), reinterpret_cast<const uint8_t*>(kDefaultPassword), n);", "      return constTimeEq(reinterpret_cast<const uint8_t*>(pw), reinterpret_cast<const uint8_t*>(kDefaultPassword), n);"),
+    ("default compare", "      return strlen(pw) == n && constTimeEq(reinterpret_cast<const uint8_t*>(pw), reinterpret_cast<const uint8_t*>(kDefaultPassword), n);", "      return strlen(pw) == n;"),
+    ("stored compare", "    return constTimeEq(h, hash_, 32);", "    return constTimeEq(h, hash_, 31);"),
+    ("lock flag", "    if (!locked_) return 0;", ""),
+    ("login lock", "    if (lockedForMs(now)) return AuthErr::Locked;", ""),
+    ("login unlocks", "    locked_ = false;\n    if (!passwordOk(pw)) {", "    if (!passwordOk(pw)) {"),
+    ("login limit", "      if (++fails_ >= kMaxFails) {", "      if (++fails_ > kMaxFails) {"),
+    ("login resets misses at lock", "        fails_ = 0;\n        locked_ = true;", "        locked_ = true;"),
+    ("login lock time", "        lockUntil_ = now + kLockMs;", "        lockUntil_ = now;"),
+    ("login clears misses", "    fails_ = 0;\n    size_t slot = 0;", "    size_t slot = 0;"),
+    ("login free slot", "      if (!s_[i].used) { slot = i; found = true; break; }", "      if (s_[i].used) { slot = i; found = true; break; }"),
+    ("login evicts idlest", "        if (int32_t(s_[slot].last - s_[i].last) > 0) slot = i;", "        if (int32_t(s_[slot].last - s_[i].last) < 0) slot = i;"),
+    ("login marks used", "    s_[slot].used = true;\n    s_[slot].last = now;", "    s_[slot].last = now;"),
+    ("login stamps", "    s_[slot].last = now;\n    memcpy", "    memcpy"),
+    ("login stores token", "    memcpy(s_[slot].tok, rnd, kTokenBytes);", ""),
+    ("login token text", "    toHex(rnd, kTokenBytes, token);", "    token[0] = 0;"),
+    ("valid parses", "    if (!token || !fromHex(token, t, kTokenBytes)) return false;\n    bool ok = false;\n    for (size_t i = 0; i < kMaxSessions; i++) {  // every slot", "    if (!token) return false;\n    bool ok = false;\n    for (size_t i = 0; i < kMaxSessions; i++) {  // every slot"),
+    ("valid idle", "      if (int32_t(now - s_[i].last) > int32_t(kSessionIdleMs)) { s_[i].used = false; continue; }", "      if (int32_t(now - s_[i].last) >= int32_t(kSessionIdleMs)) { s_[i].used = false; continue; }"),
+    ("valid forgets", "      if (int32_t(now - s_[i].last) > int32_t(kSessionIdleMs)) { s_[i].used = false; continue; }", "      if (int32_t(now - s_[i].last) > int32_t(kSessionIdleMs)) { continue; }"),
+    ("valid renews", "      if (match) { s_[i].last = now; ok = true; }", "      if (match) { ok = true; }"),
+    ("valid match", "      if (match) { s_[i].last = now; ok = true; }", "      if (true) { s_[i].last = now; ok = true; }"),
+    ("valid unused", "      if (!s_[i].used) continue;\n      bool match = constTimeEq(t, s_[i].tok, kTokenBytes);\n      if (int32_t(now", "      bool match = constTimeEq(t, s_[i].tok, kTokenBytes);\n      if (int32_t(now"),
+    ("alive idle", "      if (match && int32_t(now - s_[i].last) <= int32_t(kSessionIdleMs)) ok = true;", "      if (match && int32_t(now - s_[i].last) < int32_t(kSessionIdleMs)) ok = true;"),
+    ("alive idle ignored", "      if (match && int32_t(now - s_[i].last) <= int32_t(kSessionIdleMs)) ok = true;", "      if (match) ok = true;"),
+    ("alive match", "      if (match && int32_t(now - s_[i].last) <= int32_t(kSessionIdleMs)) ok = true;", "      if (int32_t(now - s_[i].last) <= int32_t(kSessionIdleMs)) ok = true;"),
+    ("alive parses", "  bool alive(const char* token, uint32_t now) const {\n    uint8_t t[kTokenBytes];\n    if (!token || !fromHex(token, t, kTokenBytes)) return false;", "  bool alive(const char* token, uint32_t now) const {\n    uint8_t t[kTokenBytes];\n    if (!token) return false;"),
+    ("logout match", "      if (s_[i].used && constTimeEq(t, s_[i].tok, kTokenBytes)) s_[i].used = false;\n  }\n\n  // After", "      if (s_[i].used) s_[i].used = false;\n  }\n\n  // After"),
+    ("logout parses", "  void logout(const char* token) {\n    uint8_t t[kTokenBytes];\n    if (!token || !fromHex(token, t, kTokenBytes)) return;", "  void logout(const char* token) {\n    uint8_t t[kTokenBytes];\n    if (!token) return;"),
+    ("end all keeps", "      if (s_[i].used && !(have && constTimeEq(t, s_[i].tok, kTokenBytes))) s_[i].used = false;", "      if (s_[i].used) s_[i].used = false;"),
+    ("end all ends others", "      if (s_[i].used && !(have && constTimeEq(t, s_[i].tok, kTokenBytes))) s_[i].used = false;", "      if (s_[i].used && (have && constTimeEq(t, s_[i].tok, kTokenBytes))) s_[i].used = false;"),
+    ("end all have", "    bool have = keep && fromHex(keep, t, kTokenBytes);", "    bool have = true;"),
+    ("session count", "    for (size_t i = 0; i < kMaxSessions; i++) n += s_[i].used ? 1 : 0;", "    for (size_t i = 0; i < kMaxSessions; i++) n += 1;"),
+    ("code locked", 'case AuthErr::Locked: return "locked";', 'case AuthErr::Locked: return "lock";'),
+    ("code policy", 'case AuthErr::Policy: return "weak_password";', 'case AuthErr::Policy: return "weak";'),
+    ("constant lock", "constexpr uint32_t kLockMs = 30UL * 1000;", "constexpr uint32_t kLockMs = 3UL * 1000;"),
+    ("constant idle", "constexpr uint32_t kSessionIdleMs = 3600UL * 1000;", "constexpr uint32_t kSessionIdleMs = 600UL * 1000;"),
+    ("constant fails", "constexpr uint8_t kMaxFails = 5;", "constexpr uint8_t kMaxFails = 6;"),
+    ("constant sessions", "constexpr size_t kMaxSessions = 3;", "constexpr size_t kMaxSessions = 4;"),
+    ("constant min", "constexpr size_t kMinPassword = 8;", "constexpr size_t kMinPassword = 7;"),
+    ("constant max", "constexpr size_t kMaxPassword = 32;", "constexpr size_t kMaxPassword = 33;"),
+    ("constant rounds", "constexpr uint16_t kHashRounds = 500;", "constexpr uint16_t kHashRounds = 50;"),
+    ("constant default", 'constexpr const char* kDefaultPassword = "espframework";', 'constexpr const char* kDefaultPassword = "espframeworks";'),
+]
+
+SHA = [
+    ("init", "0x6a09e667, 0xbb67ae85,", "0x6a09e668, 0xbb67ae85,"),
+    ("k first", "0x428a2f98, 0x71374491,", "0x428a2f99, 0x71374491,"),
+    ("k last", "0xbef9a3f7, 0xc67178f2};", "0xbef9a3f7, 0xc67178f3};"),
+    ("pad bit", "uint8_t pad = 0x80;", "uint8_t pad = 0x81;"),
+    ("pad zeros", "while (fill_ != 56) update(&zero, 1);", "while (fill_ != 55) update(&zero, 1);"),
+    ("length bits", "uint64_t bits = len_ * 8;", "uint64_t bits = len_ * 7;"),
+    ("length bytes", "lenBytes[i] = uint8_t(bits >> (56 - 8 * i));", "lenBytes[i] = uint8_t(bits >> (8 * i));"),
+    ("block full", "      if (fill_ == 64) { block(buf_); fill_ = 0; }", "      if (fill_ == 63) { block(buf_); fill_ = 0; }"),
+    ("update length", "    len_ += uint64_t(n);", "    len_ += uint64_t(n) + 1;"),
+    ("schedule s0", "uint32_t s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);", "uint32_t s0 = rotr(w[i - 15], 8) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);"),
+    ("schedule s1", "uint32_t s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);", "uint32_t s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 11);"),
+    ("round s1", "uint32_t s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);", "uint32_t s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 24);"),
+    ("round ch", "uint32_t ch = (e & f) ^ (~e & g);", "uint32_t ch = (e & f) ^ (e & g);"),
+    ("round s0", "uint32_t s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);", "uint32_t s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 21);"),
+    ("round maj", "uint32_t maj = (a & b) ^ (a & c) ^ (b & c);", "uint32_t maj = (a & b) ^ (a & c);"),
+    ("round rotate", "h = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;", "h = g; g = f; f = e; e = d; d = c; c = b; b = a; a = t1 + t2;"),
+    ("output order", "out[4 * i] = uint8_t(h_[i] >> 24);", "out[4 * i] = uint8_t(h_[i] >> 23);"),
+]
+
 SETS = [
     ("devices", "src/devices/DeviceTypes.h", "test_devices", DEVICES),
     ("p4", "src/devices/DeviceTypes.h", "test_p4", P4),
@@ -523,13 +615,20 @@ SETS = [
     ("seq rules", "src/automation/AutomationRules.h", "test_p7", SEQ_RULES),
     ("seq core", "src/automation/AutomationCore.h", "test_p7", SEQ_CORE),
     ("dashboard timer", "src/dashboard/DashboardRules.h", "test_p6", DASH_TIMER),
+    ("auth", "src/security/AuthCore.h", "test_p8", AUTH),
+    ("sha256", "src/security/Sha256.h", "test_p8", SHA),
     ("queue", "src/devices/OpQueue.h", "test_ws", QUEUE),
     ("limiter", "src/net/RateLimiter.h", "test_ws", LIMITER),
 ]
 
 def run_tests(folder):
-    r = subprocess.run([sys.executable, "-m", "platformio", "test", "-e", "native", "-f", folder],
-                       cwd=ROOT, capture_output=True, text=True)
+    # A mutant can make code loop forever: a test run that takes this long counts as failed (the mutant is caught).
+    try:
+        r = subprocess.run([sys.executable, "-m", "platformio", "test", "-e", "native", "-f", folder],
+                           cwd=ROOT, capture_output=True, text=True, timeout=240)
+    except subprocess.TimeoutExpired:
+        subprocess.run(["taskkill", "/F", "/IM", "program.exe"], capture_output=True)
+        return False
     return r.returncode == 0
 
 # MUT_ONLY=<regex on "set/mutant"> reruns just those mutants (a quick recheck after fixing survivors).

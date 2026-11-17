@@ -17,7 +17,10 @@
 #include "devices/DeviceRegistry.h"
 #include "devices/DeviceStore.h"
 #include "net/NetworkStore.h"
+#include "net/Ota.h"
+#include "net/Token.h"
 #include "net/WsHub.h"
+#include "security/AuthManager.h"
 
 namespace espwf {
 
@@ -42,6 +45,16 @@ static void sendDevErr(AsyncWebServerRequest* r, DevErr e) {
   sendError(r, statusFor(e), devErrCode(e), devErrField(e));
 }
 
+
+// State of the firmware upload in progress (one at a time; the upload callback and the final one share it).
+static bool gOtaFailed = false, gOtaStarted = false, gOtaDone = false;
+static char gOtaErr[56] = {0};
+static void otaFail(const char* why) {
+  gOtaFailed = true;
+  copyStr(gOtaErr, why, sizeof gOtaErr);
+  if (gOtaStarted) { espwf::Ota::abort(); gOtaStarted = false; }
+}
+
 static int statusFor(AutoErr e) {
   switch (e) {
     case AutoErr::NotFound: return 404;
@@ -54,13 +67,14 @@ static int statusFor(AutoErr e) {
 
 static void sendAutoErr(AsyncWebServerRequest* r, AutoErr e) { sendError(r, statusFor(e), autoErrCode(e), autoErrField(e)); }
 
-void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry& devices, WsHub& ws, AutomationEngine& automation) {
+void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry& devices, WsHub& ws, AutomationEngine& automation, AuthManager& auth) {
   server_ = new AsyncWebServer(80);
-  ws.attach(*server_, fw, devices);  // before the static-file handler, which would otherwise answer /ws
+  ws.attach(*server_, fw, devices, auth);  // before the static-file handler, which would otherwise answer /ws
   FrameworkController* f = &fw;
   NetworkManager* n = &net;
   DeviceRegistry* dv = &devices;
   AutomationEngine* at = &automation;
+  AuthManager* au = &auth;
 
   server_->on("/api/v1/system", HTTP_GET, [f](AsyncWebServerRequest* r) {
     JsonDocument d;
@@ -293,6 +307,127 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry
   });
 
   // The status route is registered before the config route: this server matches a route as a prefix of longer paths.
+  // ---- login. Everything under /api/ and the WebSocket needs a session, except /api/v1/session itself.
+  // The UI files stay public: they hold no secrets, and the login page has to load.
+  server_->addMiddleware([au](AsyncWebServerRequest* r, ArMiddlewareNext next) {
+    const String& u = r->url();
+    bool guarded = u.startsWith("/api/") || u == "/ws";
+    if (!guarded || u == "/api/v1/session") { next(); return; }
+    char tok[kTokenChars + 1];
+    if (!tokenFrom(r, tok) || !au->valid(tok)) { sendError(r, 401, "unauthorized"); return; }
+    if (au->mustChange() && u != "/api/v1/password") { sendError(r, 403, "password_change_required"); return; }
+    next();
+  });
+
+  server_->on("/api/v1/session", HTTP_GET, [au, f](AsyncWebServerRequest* r) {
+    char tok[kTokenChars + 1];
+    bool ok = tokenFrom(r, tok) && au->valid(tok);
+    JsonDocument d;
+    d["authenticated"] = ok;
+    d["must_change"] = ok && au->mustChange();
+    d["name"] = f->deviceName();
+    sendJson(r, d);
+  });
+
+  server_->on("/api/v1/session", HTTP_DELETE, [au](AsyncWebServerRequest* r) {
+    char tok[kTokenChars + 1];
+    if (tokenFrom(r, tok)) au->logout(tok);
+    AsyncResponseStream* s = r->beginResponseStream("application/json");
+    s->addHeader("Cache-Control", "no-store");
+    s->addHeader("Set-Cookie", "sid=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0");
+    s->print("{\"ok\":true}");
+    r->send(s);
+  });
+
+  auto* login = new AsyncCallbackJsonWebHandler("/api/v1/session", [au](AsyncWebServerRequest* r, JsonVariant& json) {
+    const char* pw = json["password"].is<const char*>() ? json["password"].as<const char*>() : "";
+    char tok[kTokenChars + 1];
+    AuthErr e = au->login(pw, tok);
+    if (e == AuthErr::Locked) {
+      JsonDocument d;
+      d["error"] = "locked";
+      d["retry_s"] = (au->lockedForMs() + 999) / 1000;
+      sendJson(r, d, 429);
+      return;
+    }
+    if (e != AuthErr::Ok) { sendError(r, 401, authErrCode(e)); return; }
+    AsyncResponseStream* s = r->beginResponseStream("application/json");
+    s->addHeader("Cache-Control", "no-store");
+    s->addHeader("Set-Cookie", String("sid=") + tok + "; Path=/; HttpOnly; SameSite=Strict");  // a session cookie: the board enforces the idle time
+    JsonDocument d;
+    d["ok"] = true;
+    d["token"] = tok;  // for scripts; the browser uses the cookie
+    d["must_change"] = au->mustChange();
+    serializeJson(d, *s);
+    r->send(s);
+  });
+  login->setMethod(HTTP_POST);
+  login->setMaxContentLength(160);
+  server_->addHandler(login);
+
+  auto* pwchange = new AsyncCallbackJsonWebHandler("/api/v1/password", [au](AsyncWebServerRequest* r, JsonVariant& json) {
+    const char* cur = json["current"].is<const char*>() ? json["current"].as<const char*>() : "";
+    const char* nxt = json["password"].is<const char*>() ? json["password"].as<const char*>() : "";
+    char tok[kTokenChars + 1];
+    tokenFrom(r, tok);
+    AuthErr e = au->changePassword(cur, nxt, tok);
+    if (e == AuthErr::Ok) {
+      JsonDocument d;
+      d["ok"] = true;
+      sendJson(r, d);
+    } else if (e == AuthErr::Locked) {
+      sendError(r, 429, "locked");
+    } else if (e == AuthErr::Wrong) {
+      sendError(r, 403, "wrong_password", "current");
+    } else {
+      sendError(r, 400, authErrCode(e), "password");
+    }
+  });
+  pwchange->setMethod(HTTP_PUT);
+  pwchange->setMaxContentLength(220);
+  server_->addHandler(pwchange);
+
+  // ---- firmware update: multipart upload of the .bin; ?md5=<32 hex> is checked when the last byte arrives.
+  // The upload callback runs before the middleware's final check, so it asks for a session itself.
+  server_->on(
+      "/api/v1/system/update", HTTP_POST,
+      [f](AsyncWebServerRequest* r) {
+        JsonDocument d;
+        if (!gOtaFailed && gOtaDone) {
+          d["ok"] = true;
+          d["restarting"] = true;
+          sendJson(r, d);
+          f->restart();
+        } else {
+          d["error"] = "update_failed";
+          d["detail"] = gOtaErr[0] ? gOtaErr : "no firmware received";
+          sendJson(r, d, 400);
+        }
+        gOtaFailed = gOtaStarted = gOtaDone = false;
+      },
+      [au](AsyncWebServerRequest* r, const String& filename, size_t index, uint8_t* data, size_t len, bool final) {
+        if (index == 0) {
+          gOtaFailed = gOtaStarted = gOtaDone = false;
+          gOtaErr[0] = 0;
+          char tok[kTokenChars + 1];
+          if (!tokenFrom(r, tok) || !au->valid(tok) || au->mustChange()) otaFail("unauthorized");
+          else if (espwf::Ota::busy()) otaFail("another update is running");
+          else if (!filename.endsWith(".bin")) otaFail("not a .bin file");
+          else {
+            String md5 = r->hasParam("md5") ? r->getParam("md5")->value() : String();
+            if (!espwf::Ota::begin(r->contentLength(), md5.c_str())) otaFail(espwf::Ota::errorText());
+            else gOtaStarted = true;
+          }
+        }
+        if (gOtaFailed) return;
+        if (!espwf::Ota::write(data, len)) { otaFail(espwf::Ota::errorText()); return; }
+        if (final) {
+          gOtaStarted = false;
+          if (!espwf::Ota::end()) otaFail(espwf::Ota::errorText());
+          else gOtaDone = true;
+        }
+      });
+
   // ---- sequences and timers. Longer paths first: this server matches a route as a prefix of longer ones.
   server_->on("/api/v1/automation/timers", HTTP_GET, [at](AsyncWebServerRequest* r) {  // light: the dashboard polls it
     AsyncResponseStream* s = r->beginResponseStream("application/json");
