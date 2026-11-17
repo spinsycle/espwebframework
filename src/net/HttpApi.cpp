@@ -58,11 +58,13 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net) {
   });
 
   auto* put = new AsyncCallbackJsonWebHandler("/api/v1/network", [n](AsyncWebServerRequest* r, JsonVariant& json) {
+    Serial.printf("[http] PUT /network from %s\n", r->client()->remoteIP().toString().c_str());
     NetworkConfig c = n->config();
     NetCfgError e = NetworkStore::applyJson(json, c);
     if (e == NetCfgError::Ok) e = validateNetworkConfig(c);
     if (e == NetCfgError::Ok) e = n->requestApply(c);
     if (e != NetCfgError::Ok) {
+      Serial.printf("[http] network config rejected: %s\n", netCfgErrorField(e));
       sendError(r, 400, "invalid_network_config", netCfgErrorField(e));
       return;
     }
@@ -70,6 +72,7 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net) {
     d["ok"] = true;
     d["apply_in_ms"] = NetworkManager::kApplyDelayMs;
     sendJson(r, d);
+    Serial.println("[http] network config accepted, reply sent");
   });
   put->setMethod(HTTP_PUT);
   put->setMaxContentLength(1024);

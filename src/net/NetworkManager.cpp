@@ -58,6 +58,7 @@ NetCfgError NetworkManager::requestApply(const NetworkConfig& cfg) {
   if (e != NetCfgError::Ok) return e;
   pending_ = cfg;
   applyAt_ = millis() + kApplyDelayMs;
+  Serial.printf("[net] %lu apply queued (in %lu ms)\n", (unsigned long)millis(), (unsigned long)kApplyDelayMs);
   hasPending_ = true;
   return NetCfgError::Ok;
 }
@@ -70,13 +71,21 @@ void NetworkManager::loop() {
   if (hasPending_ && int32_t(now - applyAt_) >= 0) {
     cfg_ = pending_;
     hasPending_ = false;
-    NetworkStore::save(cfg_);
+    Serial.printf("[net] %lu applying mode=%s sta='%s'\n", (unsigned long)now, netModeName(cfg_.mode), cfg_.staSsid);
+    bool saved = NetworkStore::save(cfg_);
+    Serial.printf("[net] config saved=%d\n", saved);
     apply();
+    Serial.printf("[net] %lu applied\n", (unsigned long)millis());
     return;
   }
 
   if (!wantsSta()) return;
-  if (staConnected()) {
+  bool conn = staConnected();
+  if (conn != lastConn_) {
+    lastConn_ = conn;
+    Serial.printf("[net] %lu station %s\n", (unsigned long)now, conn ? "connected" : "disconnected");
+  }
+  if (conn) {
     staLostSince_ = 0;
     if (recoveryAp_ && cfg_.mode == NetMode::STA) {  // link is back: drop the recovery AP
       WiFi.softAPdisconnect(true);
@@ -110,7 +119,19 @@ void NetworkManager::status(JsonObject out) const {
   JsonObject sta = out["sta"].to<JsonObject>();
   sta["enabled"] = wantsSta();
   sta["connected"] = conn;
-  if (wantsSta()) sta["ssid"] = cfg_.staSsid;
+  if (wantsSta()) {
+    sta["ssid"] = cfg_.staSsid;
+    if (!conn) {
+      wl_status_t s = WiFi.status();
+      sta["reason"] = s == WL_NO_SSID_AVAIL ? "network not found (2.4 GHz? exact name?)"
+#if defined(ESP8266)
+                    : s == WL_WRONG_PASSWORD ? "wrong password"
+#endif
+                    : s == WL_CONNECT_FAILED ? "join failed"
+                    : "not connected";
+      sta["code"] = (int)s;  // raw wl_status_t: 0 idle, 1 no SSID, 4 connect failed, 6/7 disconnected
+    }
+  }
   if (conn) {
     sta["ip"] = WiFi.localIP().toString();
     sta["rssi"] = WiFi.RSSI();

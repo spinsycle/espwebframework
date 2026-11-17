@@ -33,6 +33,7 @@ class NetworkManager {
   uint32_t applyAt_ = 0;
   uint32_t staLostSince_ = 0;
   bool recoveryAp_ = false;
+  bool lastConn_ = false;
 };
 
 }  // namespace espwf

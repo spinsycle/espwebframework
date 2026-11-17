@@ -56,7 +56,7 @@ struct NetworkConfig {
   char apSsid[kSsidCap] = {0};
   char apPass[kPassCap] = {0};
   uint8_t apChannel = 1;
-  uint8_t apIp[4] = {192, 168, 4, 1};
+  uint8_t apIp[4] = {192, 168, 73, 1};  // off the common 192.168.0/1/4 home subnets: an overlap breaks AP+STA
   char staSsid[kSsidCap] = {0};
   char staPass[kPassCap] = {0};
   bool staStatic = false;

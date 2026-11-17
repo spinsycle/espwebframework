@@ -33,7 +33,7 @@ function renderStatus(s) {
   $("fs").textContent = fmtBytes(s.filesystem.used) + " / " + fmtBytes(s.filesystem.total);
   const n = s.network;
   $("ap").textContent = n.ap.active ? n.ap.ssid + " @ " + n.ap.ip + " (" + n.ap.clients + " clients)" : "off";
-  $("sta").textContent = !n.sta.enabled ? "off" : n.sta.connected ? n.sta.ssid + " @ " + n.sta.ip + " (" + n.sta.rssi + " dBm)" : "connecting to " + n.sta.ssid + "…";
+  $("sta").textContent = !n.sta.enabled ? "off" : n.sta.connected ? n.sta.ssid + " @ " + n.sta.ip + " (" + n.sta.rssi + " dBm)" : "connecting to " + n.sta.ssid + ": " + n.sta.reason + " (code " + n.sta.code + ")";
   $("reset").textContent = s.reset_reason;
 }
 
