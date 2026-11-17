@@ -6,6 +6,8 @@
 #include <LittleFS.h>
 
 #include "core/Framework.h"
+#include "devices/DeviceRegistry.h"
+#include "devices/DeviceStore.h"
 #include "net/NetworkStore.h"
 
 namespace espwf {
@@ -25,10 +27,17 @@ static void sendError(AsyncWebServerRequest* r, int code, const char* error, con
   sendJson(r, d, code);
 }
 
-void HttpApi::begin(FrameworkController& fw, NetworkManager& net) {
+static int statusFor(DevErr e) { return e == DevErr::NotFound ? 404 : e == DevErr::Full ? 503 : 400; }
+
+static void sendDevErr(AsyncWebServerRequest* r, DevErr e) {
+  sendError(r, statusFor(e), devErrCode(e), devErrField(e));
+}
+
+void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry& devices) {
   server_ = new AsyncWebServer(80);
   FrameworkController* f = &fw;
   NetworkManager* n = &net;
+  DeviceRegistry* dv = &devices;
 
   server_->on("/api/v1/system", HTTP_GET, [f](AsyncWebServerRequest* r) {
     JsonDocument d;
@@ -77,6 +86,74 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net) {
   put->setMethod(HTTP_PUT);
   put->setMaxContentLength(1024);
   server_->addHandler(put);
+
+  // ---- devices. Config changes and commands are queued (202); loop() applies them.
+  server_->on("/api/v1/devices", HTTP_GET, [dv](AsyncWebServerRequest* r) {
+    AsyncResponseStream* s = r->beginResponseStream("application/json");
+    s->addHeader("Cache-Control", "no-store");
+    s->print("{\"devices\":[");
+    DeviceView v;
+    for (size_t i = 0; dv->view(i, v); i++) {  // one device per small document: no big heap block
+      JsonDocument d;
+      DeviceRegistry::describe(v, d.to<JsonObject>());
+      if (i) s->print(',');
+      serializeJson(d, *s);
+    }
+    s->print("]}");
+    r->send(s);
+  });
+
+  server_->on("/api/v1/devices", HTTP_DELETE, [dv](AsyncWebServerRequest* r) {
+    if (!r->hasParam("id")) { sendError(r, 400, "bad_id", "id"); return; }
+    DevErr e = dv->requestRemove(r->getParam("id")->value().c_str());
+    if (e != DevErr::Ok) { sendDevErr(r, e); return; }
+    JsonDocument d;
+    d["ok"] = true;
+    sendJson(r, d, 202);
+  });
+
+  auto* add = new AsyncCallbackJsonWebHandler("/api/v1/devices", [dv](AsyncWebServerRequest* r, JsonVariant& json) {
+    DeviceConfig c;
+    DevErr e = DeviceStore::applyJson(json, c);
+    if (e == DevErr::Ok) e = dv->requestAdd(c);
+    if (e != DevErr::Ok) { sendDevErr(r, e); return; }
+    JsonDocument d;
+    d["ok"] = true;
+    sendJson(r, d, 202);
+  });
+  add->setMethod(HTTP_POST);
+  add->setMaxContentLength(512);
+  server_->addHandler(add);
+
+  auto* command = new AsyncCallbackJsonWebHandler("/api/v1/command", [dv](AsyncWebServerRequest* r, JsonVariant& json) {
+    const char* id = json["id"].is<const char*>() ? json["id"].as<const char*>() : nullptr;
+    Command c;
+    if (!id || !parseAction(json["action"].as<const char*>(), c.action)) {
+      sendError(r, 400, id ? "bad_action" : "bad_id", id ? "action" : "id");
+      return;
+    }
+    JsonVariantConst val = json["value"];
+    if (!val.isNull()) {
+      c.hasValue = true;
+      c.isBool = val.is<bool>();
+      c.value = c.isBool ? (val.as<bool>() ? 1 : 0) : val.is<double>() ? val.as<double>() : 0;
+      if (!c.isBool && !val.is<double>()) c.hasValue = false;  // a string or object is "no usable value"
+    }
+    CmdErr e = dv->requestCommand(id, c);
+    if (e != CmdErr::Ok) {
+      int code = e == CmdErr::NotFound ? 404 : e == CmdErr::NotCommandable ? 409 : e == CmdErr::QueueFull ? 503 : 400;
+      const char* name = e == CmdErr::NotFound ? "not_found" : e == CmdErr::NotCommandable ? "not_commandable"
+                       : e == CmdErr::QueueFull ? "busy" : e == CmdErr::BadAction ? "bad_action" : "bad_value";
+      sendError(r, code, name, e == CmdErr::BadValue ? "value" : e == CmdErr::BadAction ? "action" : "id");
+      return;
+    }
+    JsonDocument d;
+    d["ok"] = true;
+    sendJson(r, d, 202);
+  });
+  command->setMethod(HTTP_POST);
+  command->setMaxContentLength(256);
+  server_->addHandler(command);
 
   server_->serveStatic("/", LittleFS, "/www/").setDefaultFile("index.html");
 

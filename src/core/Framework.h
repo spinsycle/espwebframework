@@ -6,6 +6,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
+#include "devices/DeviceRegistry.h"
 #include "net/HttpApi.h"
 #include "net/NetworkManager.h"
 
@@ -23,9 +24,11 @@ class FrameworkController {
   // factoryReset() arrives with the config system (P5).
 
   espwf::NetworkManager& network() { return net_; }
+  espwf::DeviceRegistry& devices() { return devices_; }
 
  private:
   char deviceName_[33] = "ESP Device";
+  espwf::DeviceRegistry devices_;
   espwf::NetworkManager net_;
   espwf::HttpApi http_;
   uint32_t restartAt_ = 0;

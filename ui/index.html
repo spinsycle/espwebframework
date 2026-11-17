@@ -13,6 +13,7 @@
 </header>
 <nav id="tabs">
   <button data-tab="dash" class="on">Dashboard</button>
+  <button data-tab="dev">Devices</button>
   <button data-tab="net">Network</button>
   <button data-tab="sys">System</button>
 </nav>
@@ -27,6 +28,37 @@
       <div class="card"><h3>Wi-Fi client</h3><p id="sta">-</p></div>
       <div class="card"><h3>Last reset</h3><p id="reset">-</p></div>
     </div>
+  </section>
+
+  <section id="dev" hidden>
+    <p id="devempty" class="hint">No devices yet. Add one below.</p>
+    <div id="devlist" class="grid"></div>
+    <form id="devform" autocomplete="off">
+      <h3>Add device</h3>
+      <label>ID <input name="id" maxlength="16" placeholder="relay1 (a-z 0-9 _ -)" required></label>
+      <label>Name <input name="name" maxlength="24" placeholder="optional label"></label>
+      <label>Type
+        <select name="type">
+          <option value="relay">Relay / digital output</option>
+          <option value="input">Digital input / button</option>
+          <option value="pwm">PWM output</option>
+        </select>
+      </label>
+      <label>GPIO pin <input name="pin" type="number" min="0" max="39" required></label>
+      <label class="row"><input name="invert" type="checkbox"> <span id="invlabel">Active low</span></label>
+      <div data-for="input">
+        <label class="row"><input name="pullup" type="checkbox"> Internal pull-up</label>
+        <label>Debounce (ms) <input name="debounce_ms" type="number" min="0" max="1000" value="30"></label>
+      </div>
+      <div data-for="pwm">
+        <label>Frequency (Hz) <input name="freq_hz" type="number" min="1" max="20000" value="1000"></label>
+      </div>
+      <div data-for="relay pwm">
+        <label>At boot <span id="initlabel">(0 off, 1 on)</span> <input name="initial" type="number" min="0" max="100" value="0"></label>
+      </div>
+      <button type="submit">Add device</button>
+      <p id="devmsg" role="status"></p>
+    </form>
   </section>
 
   <section id="net" hidden>

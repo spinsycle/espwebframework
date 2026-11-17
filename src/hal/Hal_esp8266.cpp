@@ -32,6 +32,22 @@ size_t fsUsed() {
   return LittleFS.info(i) ? i.usedBytes : 0;
 }
 
+CriticalSection::CriticalSection() {}   // single-threaded: callbacks only run when loop() yields
+CriticalSection::~CriticalSection() {}
+
+void pwmAttach(int pin, uint32_t freqHz, uint8_t) {
+  analogWriteRange(1000);  // so duty is permille
+  analogWriteFreq(freqHz);
+  pinMode(pin, OUTPUT);
+}
+
+void pwmWrite(int pin, uint8_t, uint16_t permille) { analogWrite(pin, permille); }
+
+void pwmDetach(int pin, uint8_t) {
+  analogWrite(pin, 0);
+  digitalWrite(pin, LOW);
+}
+
 }  // namespace hal
 }  // namespace espwf
 #endif  // ESP8266

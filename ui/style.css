@@ -22,6 +22,16 @@ button[type=submit],button.danger{background:var(--acc);color:#04121f;border:0;b
 button.danger{background:var(--bad);color:#fff;margin-top:12px}
 dl{margin:0;display:grid;grid-template-columns:max-content 1fr;gap:6px 16px}
 dt{color:var(--dim)} dd{margin:0;word-break:break-word}
-#netmsg{min-height:1.4em;color:var(--dim)}
-#netmsg.err{color:var(--bad)}
+#netmsg,#devmsg{min-height:1.4em;color:var(--dim)}
+#netmsg.err,#devmsg.err{color:var(--bad)}
+.hint{color:var(--dim)}
+.showbtn{justify-self:start;background:none;border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:6px 12px;font:inherit;font-size:14px}
+#devform{margin-top:20px}
+.dev{display:grid;gap:8px}
+.dev .top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.dev button.tgl{background:var(--line);color:var(--fg);border:0;border-radius:6px;padding:12px;font:inherit;font-weight:600}
+.dev button.tgl.on{background:var(--ok);color:#04210f}
+.dev button.rm{background:none;border:0;color:var(--dim);padding:0;font:inherit;text-decoration:underline}
+.dev input[type=range]{width:100%;padding:0}
+.warn{color:#ffb020}
 [hidden]{display:none!important}

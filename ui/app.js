@@ -20,6 +20,7 @@ document.querySelectorAll("#tabs button").forEach((b) =>
   b.addEventListener("click", () => {
     document.querySelectorAll("#tabs button").forEach((x) => x.classList.toggle("on", x === b));
     document.querySelectorAll("main > section").forEach((s) => (s.hidden = s.id !== b.dataset.tab));
+    if (b.dataset.tab === "dev") loadDevices();
     if (b.dataset.tab === "net") loadNet();
     if (b.dataset.tab === "sys") loadSys();
   })
@@ -49,6 +50,86 @@ async function poll() {
   setTimeout(poll, 2000);
 }
 
+// ---- devices (polling; WebSocket replaces this in P3)
+const cmd = (id, action, value) =>
+  api("/command", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value === undefined ? { id, action } : { id, action, value }) });
+
+function el(tag, props, ...kids) {
+  const e = Object.assign(document.createElement(tag), props || {});
+  e.append(...kids);
+  return e;
+}
+
+function devCard(d) {
+  const top = el("div", { className: "top" }, el("strong", { textContent: d.name }),
+    el("small", { textContent: d.type + " · GPIO" + d.pin + (d.invert ? " · inverted" : "") }));
+  const body = el("div");
+  if (d.type === "relay") {
+    const on = d.state.on;
+    const b = el("button", { type: "button", className: "tgl" + (on ? " on" : ""), textContent: on ? "ON" : "OFF" });
+    b.onclick = async () => { await cmd(d.id, "toggle").catch(() => {}); setTimeout(loadDevices, 150); };
+    body.append(b);
+  } else if (d.type === "pwm") {
+    const out = el("span", { textContent: d.state.duty + " %" });
+    const r = el("input", { type: "range", min: 0, max: 100, value: d.state.duty });
+    r.oninput = () => (out.textContent = r.value + " %");
+    r.onchange = () => cmd(d.id, "set", +r.value).catch(() => {});
+    body.append(out, r);
+  } else {
+    body.append(el("p", { textContent: d.state.active ? "ACTIVE" : "inactive" }), el("small", { textContent: d.state.edges + " changes" }));
+  }
+  const rm = el("button", { type: "button", className: "rm", textContent: "remove" });
+  rm.onclick = async () => {
+    if (confirm("Remove " + d.name + "?")) { await api("/devices?id=" + encodeURIComponent(d.id), { method: "DELETE" }).catch(() => {}); setTimeout(loadDevices, 250); }
+  };
+  const card = el("div", { className: "card dev" }, top, body, rm);
+  if (d.boot_sensitive) card.append(el("small", { className: "warn", textContent: "Boot-sensitive pin: a wire here can stop the board booting." }));
+  return card;
+}
+
+let devTimer = 0;
+async function loadDevices() {
+  clearTimeout(devTimer);
+  if ($("dev").hidden) return;
+  try {
+    const { devices } = await api("/devices");
+    $("devempty").hidden = devices.length > 0;
+    if (!document.activeElement || document.activeElement.type !== "range") {  // don't fight a slider being dragged
+      $("devlist").replaceChildren(...devices.map(devCard));
+    }
+  } catch (e) { /* offline dot already shows it */ }
+  devTimer = setTimeout(loadDevices, 1500);
+}
+
+function syncDevForm() {
+  const f = $("devform").elements, t = f.type.value;
+  $("devform").querySelectorAll("[data-for]").forEach((d) => (d.hidden = !d.dataset.for.split(" ").includes(t)));
+  $("invlabel").textContent = t === "input" ? "Pressed reads low (inverted)" : t === "pwm" ? "Inverted duty" : "Active low (relay on = pin low)";
+  $("initlabel").textContent = t === "pwm" ? "(duty %)" : "(0 off, 1 on)";
+}
+$("devform").elements.type.addEventListener("change", syncDevForm);
+syncDevForm();
+
+$("devform").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = $("devform").elements, t = f.type.value, msg = $("devmsg");
+  const body = { id: f.id.value, name: f.name.value, type: t, pin: +f.pin.value, invert: f.invert.checked };
+  if (t === "input") { body.pullup = f.pullup.checked; body.debounce_ms = +f.debounce_ms.value; }
+  if (t === "pwm") body.freq_hz = +f.freq_hz.value;
+  if (t !== "input") body.initial = +f.initial.value;
+  msg.className = "";
+  try {
+    await api("/devices", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    msg.textContent = "Added.";
+    $("devform").reset();
+    syncDevForm();
+    setTimeout(loadDevices, 250);
+  } catch (err) {
+    msg.className = "err";
+    msg.textContent = "Rejected: " + err.message + (err.field ? " (" + err.field + ")" : "");
+  }
+});
+
 // ---- network
 const F = () => $("netform").elements;
 function syncStatic() { $("staticbox").hidden = !F().sta_static.checked; }
@@ -69,6 +150,17 @@ async function loadNet() {
   f.ap_password.value = f.sta_password.value = "";
   syncStatic();
 }
+
+// Show/hide button on every password box, so a typo is visible before saving.
+$("netform").querySelectorAll("input[type=password]").forEach((inp) => {
+  const b = el("button", { type: "button", className: "showbtn", textContent: "Show" });
+  b.onclick = () => {
+    const hide = inp.type === "text";
+    inp.type = hide ? "password" : "text";
+    b.textContent = hide ? "Show" : "Hide";
+  };
+  inp.parentElement.append(b);
+});
 
 $("netform").elements.sta_static.addEventListener("change", syncStatic);
 $("netform").addEventListener("submit", async (e) => {

@@ -43,6 +43,25 @@ bool fsBegin() { return LittleFS.begin(true); }  // true = format on first use
 size_t fsTotal() { return LittleFS.totalBytes(); }
 size_t fsUsed() { return LittleFS.usedBytes(); }
 
+static portMUX_TYPE gMux = portMUX_INITIALIZER_UNLOCKED;
+CriticalSection::CriticalSection() { portENTER_CRITICAL(&gMux); }
+CriticalSection::~CriticalSection() { portEXIT_CRITICAL(&gMux); }
+
+// 10-bit LEDC so duty maps from permille. arduino-esp32 2.x API (platform espressif32 6.9.0).
+void pwmAttach(int pin, uint32_t freqHz, uint8_t slot) {
+  ledcSetup(slot, freqHz, 10);
+  ledcAttachPin(pin, slot);
+}
+
+void pwmWrite(int, uint8_t slot, uint16_t permille) { ledcWrite(slot, uint32_t(permille) * 1023 / 1000); }
+
+void pwmDetach(int pin, uint8_t slot) {
+  ledcWrite(slot, 0);
+  ledcDetachPin(pin);
+  pinMode(pin, OUTPUT);
+  digitalWrite(pin, LOW);
+}
+
 }  // namespace hal
 }  // namespace espwf
 #endif  // ESP32

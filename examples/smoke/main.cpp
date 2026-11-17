@@ -1,26 +1,12 @@
-// Smoke harness: framework up (AP + web UI) plus a non-blocking LED blink as a liveness signal.
+// Smoke harness: framework up (AP + web UI + device registry). Devices are added from the Devices tab,
+// so this app touches no pins itself. Use a relay on the board LED pin (GPIO2) to prove a pin works.
 #include <Framework.h>
 
 FrameworkController Framework;
 
-#ifndef LED_BUILTIN
-#define LED_BUILTIN 2
-#endif
-
 void setup() {
-  pinMode(LED_BUILTIN, OUTPUT);
   Framework.setDeviceName("Smoke Test");
   Framework.begin();
 }
 
-void loop() {
-  Framework.loop();
-
-  static uint32_t last = 0;
-  static bool on = false;
-  if (millis() - last >= 500) {  // no delay()
-    last = millis();
-    on = !on;
-    digitalWrite(LED_BUILTIN, on ? LOW : HIGH);
-  }
-}
+void loop() { Framework.loop(); }

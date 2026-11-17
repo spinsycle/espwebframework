@@ -20,5 +20,20 @@ bool fsBegin();                   // mounts LittleFS, formats it on first use
 size_t fsTotal();
 size_t fsUsed();
 
+// Brief critical section between loop() and the async server's task (a real second task on ESP32,
+// a no-op on the cooperative ESP8266). Copy small things inside it; never print or serialize.
+struct CriticalSection {
+  CriticalSection();
+  ~CriticalSection();
+  CriticalSection(const CriticalSection&) = delete;
+  CriticalSection& operator=(const CriticalSection&) = delete;
+};
+
+// PWM, duty in permille (0..1000). `slot` is a small index unique per PWM device (ESP32 LEDC channel).
+// ESP8266: the PWM frequency is global; the last device attached sets it.
+void pwmAttach(int pin, uint32_t freqHz, uint8_t slot);
+void pwmWrite(int pin, uint8_t slot, uint16_t permille);
+void pwmDetach(int pin, uint8_t slot);
+
 }  // namespace hal
 }  // namespace espwf

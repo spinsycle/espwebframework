@@ -45,9 +45,18 @@ void NetworkManager::apply() {
 #endif
     if (cfg_.staStatic) {
       WiFi.config(toIp(cfg_.staIp), toIp(cfg_.staGateway), toIp(cfg_.staMask));
-    } else {
-      WiFi.config(IPAddress(), IPAddress(), IPAddress());  // back to DHCP
-    }
+      staticApplied_ = true;
+    } else if (staticApplied_) {
+      WiFi.config(IPAddress(), IPAddress(), IPAddress());  // back to DHCP after a static run
+      staticApplied_ = false;
+    }  // plain DHCP is the default: calling config() with zeros every time can stall the DHCP client
+    // Radio power-save makes the board miss the router's DHCP reply (minutes to get an IP) and adds
+    // latency to every request. This is a mains-powered server, so keep the radio awake.
+#if defined(ESP8266)
+    WiFi.setSleepMode(WIFI_NONE_SLEEP);
+#else
+    WiFi.setSleep(false);
+#endif
     WiFi.setAutoReconnect(true);
     WiFi.begin(cfg_.staSsid, cfg_.staPass);
   }
@@ -95,6 +104,12 @@ void NetworkManager::loop() {
     return;
   }
   if (staLostSince_ == 0) staLostSince_ = now ? now : 1;
+  static uint32_t lastDbg = 0;
+  if (now - lastDbg >= 10000) {  // join progress, until it connects
+    lastDbg = now;
+    Serial.printf("[net] %lu joining: wifi status %d, ip %s\n", (unsigned long)now, (int)WiFi.status(),
+                  WiFi.localIP().toString().c_str());
+  }
   if (cfg_.mode == NetMode::STA && !recoveryAp_ && now - staLostSince_ >= kRecoveryMs) {
     WiFi.mode(WIFI_AP_STA);
     startAp(cfg_);

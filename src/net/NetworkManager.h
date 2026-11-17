@@ -34,6 +34,7 @@ class NetworkManager {
   uint32_t staLostSince_ = 0;
   bool recoveryAp_ = false;
   bool lastConn_ = false;
+  bool staticApplied_ = false;  // a static IP was set since boot, so DHCP must be restored explicitly
 };
 
 }  // namespace espwf

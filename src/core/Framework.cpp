@@ -18,6 +18,8 @@ bool FrameworkController::begin() {
 
   if (!hal::fsBegin()) Serial.println("[espwf] LittleFS mount failed");
 
+  devices_.begin();  // before Wi-Fi: relays reach their boot state as early as possible
+
   NetworkConfig cfg;
   setNetworkDefaults(cfg, hal::chipId());
   if (NetworkStore::load(cfg)) {
@@ -26,12 +28,13 @@ bool FrameworkController::begin() {
     Serial.println("[espwf] no valid network config, using defaults");
   }
   net_.begin(cfg);
-  http_.begin(*this, net_);
+  http_.begin(*this, net_, devices_);
   Serial.printf("[espwf] ready, AP '%s'\n", cfg.apSsid);
   return true;
 }
 
 void FrameworkController::loop() {
+  devices_.loop();
   net_.loop();
   if (restartPending_ && int32_t(millis() - restartAt_) >= 0) hal::restart();
 }
