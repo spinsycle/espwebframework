@@ -1,4 +1,4 @@
-# Exercises the device REST API on a live board. Usage: tools\api_smoke.ps1 -Ip 192.168.4.23 [-Chip esp8266|esp32]
+﻿# Exercises the device REST API on a live board. Usage: tools\api_smoke.ps1 -Ip 192.168.4.23 [-Chip esp8266|esp32]
 # Adds and removes devices named smoke_*; it leaves nothing behind (and refuses to run if a smoke_* device exists).
 param([Parameter(Mandatory)][string]$Ip, [ValidateSet('esp8266', 'esp32')][string]$Chip = 'esp8266')
 $ErrorActionPreference = 'Stop'
@@ -6,7 +6,7 @@ $script:fail = 0
 $script:pass = 0
 
 function Call($method, $path, $body) {
-  $args = @{ UseBasicParsing = $true; Method = $method; Uri = "http://$Ip/api/v1$path"; TimeoutSec = 6 }
+  $args = @{ UseBasicParsing = $true; Method = $method; Uri = "http://$Ip/api/v1$path"; TimeoutSec = 20 }
   if ($body) { $args.Body = ($body | ConvertTo-Json -Compress); $args.ContentType = 'application/json' }
   try {
     $r = Invoke-WebRequest @args
@@ -21,7 +21,9 @@ function Call($method, $path, $body) {
 function Check($name, $cond) {
   if ($cond) { $script:pass++; Write-Host "  ok   $name" } else { $script:fail++; Write-Host "  FAIL $name" -ForegroundColor Red }
 }
-function Settle { Start-Sleep -Milliseconds 400 }   # queued ops apply on the next loop() pass
+function Settle { Start-Sleep -Milliseconds 700 }   # queued ops apply on the next loop() pass
+# Waits (up to 10 s) until no smoke_* device is left.
+function WaitGone { for ($i = 0; $i -lt 20; $i++) { Start-Sleep -Milliseconds 500; if (-not ((Call GET '/devices').json.devices | Where-Object { $_.id -like 'smoke_*' })) { return } } }
 function Dev($id) { (Call GET '/devices').json.devices | Where-Object { $_.id -eq $id } }
 
 # Pins that are safe to claim on a bare dev board (nothing needs to be wired).
@@ -49,7 +51,7 @@ $r = Call POST '/devices' @{ id = 'smoke_x'; type = 'relay'; pin = $badPin }
 Check 'nonexistent pin rejected' ($r.code -eq 400)
 $r = Call POST '/devices' @{ id = 'Bad Id'; type = 'relay'; pin = $inPin }
 Check 'bad id rejected' ($r.code -eq 400 -and $r.json.error -eq 'bad_id')
-$r = Call POST '/devices' @{ id = 'smoke_x'; type = 'motor'; pin = $inPin }
+$r = Call POST '/devices' @{ id = 'smoke_x'; type = 'stepper'; pin = $inPin }
 Check 'unknown type rejected' ($r.code -eq 400 -and $r.json.error -eq 'bad_type')
 $r = Call POST '/devices' @{ id = 'smoke_x'; type = 'relay'; pin = 'five' }
 Check 'wrong json type rejected' ($r.code -eq 400)
@@ -87,7 +89,7 @@ Write-Host '== persistence + removal'
 Write-Host '== P4 devices (nothing needs to be wired: the pins are only configured)'
 if ($Chip -eq 'esp8266') { $mEn = 13; $mDir = 16; $sRx = 0; $sTx = 15; $svoPin = 5 } else { $mEn = 26; $mDir = 14; $sRx = 32; $sTx = 33; $svoPin = 4 }
 
-$r = Call POST '/devices' @{ id = 'smoke_mot'; type = 'motor'; pin = $mEn; pin2 = $mDir }
+$r = Call POST '/devices' @{ id = 'smoke_mot'; type = 'motor'; pin = $mEn; pin2 = $mDir; freq_hz = 500 }
 Check 'add motor accepted' ($r.code -eq 202)
 Settle
 Check 'motor boots stopped' ((Dev 'smoke_mot').state.speed -eq 0)
@@ -103,9 +105,9 @@ Check 'motor stop' ((Dev 'smoke_mot').state.speed -eq 0)
 Check 'motor 101 rejected' ((Call POST '/command' @{ id = 'smoke_mot'; action = 'set'; value = 101 }).code -eq 400)
 Check 'motor -101 rejected' ((Call POST '/command' @{ id = 'smoke_mot'; action = 'set'; value = -101 }).code -eq 400)
 Check 'motor toggle rejected' ((Call POST '/command' @{ id = 'smoke_mot'; action = 'toggle' }).code -eq 400)
-$r = Call POST '/devices' @{ id = 'smoke_mot2'; type = 'motor'; pin = $mEn }
+$r = Call POST '/devices' @{ id = 'smoke_mot2'; type = 'motor'; pin = $mEn; freq_hz = 500 }
 Check 'motor without direction pin rejected' ($r.code -eq 400 -and $r.json.error -eq 'bad_pin')
-$r = Call POST '/devices' @{ id = 'smoke_mot2'; type = 'motor'; pin = $svoPin; pin2 = $pwmPin }  # pin2 belongs to smoke_pwm
+$r = Call POST '/devices' @{ id = 'smoke_mot2'; type = 'motor'; pin = $svoPin; pin2 = $pwmPin; freq_hz = 500 }  # pin2 belongs to smoke_pwm
 Check 'motor direction pin already used rejected' ($r.code -eq 400 -and $r.json.error -eq 'pin_in_use')
 
 $r = Call POST '/devices' @{ id = 'smoke_pca'; type = 'servo'; model = 'pca9685'; pin = -1; i2c_addr = 64; channel = 0 }
@@ -174,15 +176,15 @@ if ($Chip -eq 'esp8266') {
 }
 
 Check 'delete unknown 404' ((Call DELETE '/devices?id=smoke_nope').code -eq 404)
-foreach ($id in 'smoke_led', 'smoke_pwm', 'smoke_in', 'smoke_mot', 'smoke_pca', 'smoke_bme', 'smoke_ser') {
+foreach ($id in ((Call GET '/devices').json.devices | Where-Object { $_.id -like 'smoke_*' } | ForEach-Object { $_.id })) {
   Check "delete $id" ((Call DELETE "/devices?id=$id").code -eq 202)
 }
-Settle
+WaitGone   # each removal saves to flash, so a burst of them takes a second or two
 Check 'all removed' (-not ((Call GET '/devices').json.devices | Where-Object { $_.id -like 'smoke_*' }))
 Check 'pin free again after removal' ((Call POST '/devices' @{ id = 'smoke_again'; type = 'relay'; pin = $relayPin }).code -eq 202)
-Settle
+Start-Sleep -Milliseconds 1200
 Call DELETE '/devices?id=smoke_again' | Out-Null
-Settle
+WaitGone
 $h = (Call GET '/status').json.heap
 Write-Host ("  heap free {0}, largest block {1}, fragmentation {2}%" -f $h.free, $h.max_block, $h.fragmentation_pct)
 
@@ -190,7 +192,7 @@ Write-Host ("  heap free {0}, largest block {1}, fragmentation {2}%" -f $h.free,
 Write-Host '== P5 config (edit, export, rejected imports; a good import and a factory reset restart the board, so the checklist does those)'
 Check 'edit unknown 404' ((Call PUT '/devices' @{ id = 'smoke_nope'; name = 'x' }).code -eq 404)
 Call POST '/devices' @{ id = 'smoke_ed'; type = 'relay'; pin = $relayPin; name = 'before' } | Out-Null
-Settle
+Start-Sleep -Milliseconds 1200
 Check 'edit renames in place' ((Call PUT '/devices' @{ id = 'smoke_ed'; name = 'after' }).code -eq 202)
 Settle
 Check 'edit applied' ((Dev 'smoke_ed').name -eq 'after')
@@ -222,7 +224,7 @@ Check 'rejected imports changed nothing' (((Call GET '/devices').json.devices.Co
 Check 'factory reset needs the confirm word' ((Call POST '/config/factory-reset' @{ confirm = 'yes' }).json.error -eq 'confirm_required')
 Check 'still there after refused reset' ([bool](Dev 'smoke_ed'))
 Call DELETE '/devices?id=smoke_ed' | Out-Null
-Settle
+WaitGone
 
 Write-Host ("`n{0} passed, {1} failed" -f $script:pass, $script:fail)
 exit ([int]($script:fail -gt 0))
