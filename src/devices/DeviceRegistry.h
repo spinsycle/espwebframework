@@ -5,6 +5,7 @@
 #include <ArduinoJson.h>
 
 #include "DeviceTypes.h"
+#include "OpQueue.h"
 
 namespace espwf {
 
@@ -26,7 +27,13 @@ class DeviceRegistry {
 
   size_t count() const;
   bool view(size_t index, DeviceView& out) const;
-  static void describe(const DeviceView& v, JsonObject out);  // config + live state + warnings
+  static void describe(const DeviceView& v, JsonObject out);       // config + live state + warnings
+  static void describeState(const DeviceView& v, JsonObject out);  // just the live state object
+
+  // Bumped whenever a device's state changes / a device is added or removed. Lets the WebSocket layer
+  // skip scanning when nothing happened. Read without a lock: a stale read only delays an update by one pass.
+  uint32_t stateVersion() const { return stateVer_; }
+  uint32_t structureVersion() const { return structVer_; }
 
  private:
   struct Runtime {
@@ -61,8 +68,9 @@ class DeviceRegistry {
   size_t n_ = 0;
   uint8_t pwmSlots_ = 0;  // bit i set = slot i in use
 
-  Op queue_[kQueue];
-  size_t qHead_ = 0, qTail_ = 0;
+  OpQueue<Op, kQueue> queue_;
+  volatile uint32_t stateVer_ = 0;
+  volatile uint32_t structVer_ = 0;
 };
 
 }  // namespace espwf

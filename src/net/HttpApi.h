@@ -9,10 +9,11 @@ namespace espwf {
 
 class NetworkManager;
 class DeviceRegistry;
+class WsHub;
 
 class HttpApi {
  public:
-  void begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry& devices);
+  void begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry& devices, WsHub& ws);
 
  private:
   AsyncWebServer* server_ = nullptr;  // allocated once, lives for the program's lifetime

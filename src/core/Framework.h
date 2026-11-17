@@ -9,6 +9,7 @@
 #include "devices/DeviceRegistry.h"
 #include "net/HttpApi.h"
 #include "net/NetworkManager.h"
+#include "net/WsHub.h"
 
 class FrameworkController {
  public:
@@ -31,6 +32,7 @@ class FrameworkController {
   espwf::DeviceRegistry devices_;
   espwf::NetworkManager net_;
   espwf::HttpApi http_;
+  espwf::WsHub ws_;
   uint32_t restartAt_ = 0;
   bool restartPending_ = false;
 };

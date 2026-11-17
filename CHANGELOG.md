@@ -3,7 +3,14 @@
 ## 0.0.1 - P0
 - Repo scaffold, three PlatformIO envs (nodemcuv2, esp32dev, native), smoke blink, gate script.
 
-## P2 (unreleased until hardware checklist passes)
+## P3
+- WebSocket /ws: hello, devices_changed, device_state, status (2 s), error events; commands and ping from the client.
+- Max 3 live pages (4th is refused and the page falls back to polling), 40 messages per second per page.
+- Slider bursts coalesce to the latest value per device (shared OpQueue); REST and WS share one command parser and error map.
+- UI: live updates, automatic reconnect with backoff, heartbeat, polling fallback, "Live pages" card.
+- Native tests 38, mutation check 52/52 (`tools/mutate_devices.py`); `tools/ws_smoke.py` live test written but not yet run against the board.
+
+## P2
 - Device registry and state manager: relay, digital input (debounce, edge count), PWM; up to 32 devices, 8 PWM.
 - Pin policy for both chips (flash, UART0, input-only, no-PWM, no-pull-up, boot-sensitive warnings, pin-in-use).
 - REST: GET/POST/DELETE /api/v1/devices, POST /api/v1/command. Handlers validate and queue; loop() applies.

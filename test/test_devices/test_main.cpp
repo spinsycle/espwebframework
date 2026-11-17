@@ -202,6 +202,26 @@ void test_input_not_commandable() {
   EQ(CmdErr::NotCommandable, checkCommand(DeviceType::Input, cmd(CmdAction::Set, true, true, 1)));
 }
 
+void test_cmd_error_maps() {
+  EQ(202, cmdErrHttp(CmdErr::Ok));
+  EQ(404, cmdErrHttp(CmdErr::NotFound));
+  EQ(409, cmdErrHttp(CmdErr::NotCommandable));
+  EQ(503, cmdErrHttp(CmdErr::QueueFull));
+  EQ(400, cmdErrHttp(CmdErr::BadAction));
+  EQ(400, cmdErrHttp(CmdErr::BadValue));
+  EQ(400, cmdErrHttp(CmdErr::BadId));
+  TEST_ASSERT_EQUAL_STRING("not_found", cmdErrCode(CmdErr::NotFound));
+  TEST_ASSERT_EQUAL_STRING("not_commandable", cmdErrCode(CmdErr::NotCommandable));
+  TEST_ASSERT_EQUAL_STRING("bad_action", cmdErrCode(CmdErr::BadAction));
+  TEST_ASSERT_EQUAL_STRING("bad_value", cmdErrCode(CmdErr::BadValue));
+  TEST_ASSERT_EQUAL_STRING("busy", cmdErrCode(CmdErr::QueueFull));
+  TEST_ASSERT_EQUAL_STRING("bad_id", cmdErrCode(CmdErr::BadId));
+  TEST_ASSERT_EQUAL_STRING("action", cmdErrField(CmdErr::BadAction));
+  TEST_ASSERT_EQUAL_STRING("value", cmdErrField(CmdErr::BadValue));
+  TEST_ASSERT_EQUAL_STRING("id", cmdErrField(CmdErr::NotFound));
+  TEST_ASSERT_EQUAL_STRING("id", cmdErrField(CmdErr::BadId));
+}
+
 void test_parse_helpers() {
   CmdAction a;
   TEST_ASSERT_TRUE(parseAction("set", a)); EQ(CmdAction::Set, a);
@@ -290,6 +310,7 @@ int main(int, char**) {
   RUN_TEST(test_relay_commands);
   RUN_TEST(test_pwm_commands);
   RUN_TEST(test_input_not_commandable);
+  RUN_TEST(test_cmd_error_maps);
   RUN_TEST(test_parse_helpers);
   RUN_TEST(test_level_mapping);
   RUN_TEST(test_debounce_basic);

@@ -1,12 +1,12 @@
-"""Mutation check for src/devices/DeviceTypes.h: break one thing at a time, the native tests must fail.
-Run: python tools/mutate_devices.py   (needs g++ on PATH). Exit 1 if any mutant survives or the baseline fails.
+"""Mutation check for the pure-C++ logic: break one thing at a time, the native tests must fail.
+Run: python tools/mutate_devices.py          (needs g++ on PATH). Exit 1 if any mutant survives or a baseline fails.
+Each set = (source file, test folder, mutants). Mutants are (name, old text that occurs exactly once, new text).
 """
 import os, subprocess, sys, time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FILE = os.path.join(ROOT, "src", "devices", "DeviceTypes.h")
 
-MUTANTS = [
+DEVICES = [
     ("esp8266 flash pin range", "(gpio >= 6 && gpio <= 11) || gpio == 1 || gpio == 3) return PinErr::Reserved;\n    if (role == PinRole::Pwm", "(gpio >= 7 && gpio <= 11) || gpio == 1 || gpio == 3) return PinErr::Reserved;\n    if (role == PinRole::Pwm"),
     ("esp8266 gpio16 pwm", "gpio == 16) return PinErr::NoPwm", "gpio == 15) return PinErr::NoPwm"),
     ("esp8266 max gpio", "if (gpio > 16) return PinErr::Invalid;", "if (gpio > 17) return PinErr::Invalid;"),
@@ -39,33 +39,67 @@ MUTANTS = [
     ("debounce threshold", ">= ms) { stable", "> ms) { stable"),
     ("debounce restart", "if (level != raw) { raw = level; since = now; }", "if (level != raw) { raw = level; }"),
     ("debounce prime", "if (!primed) { primed = true; raw = stable = level; since = now; return false; }", "if (!primed) { primed = true; raw = level; since = now; return false; }"),
+    ("http 404", "case CmdErr::NotFound: return 404;", "case CmdErr::NotFound: return 400;"),
+    ("http 409", "case CmdErr::NotCommandable: return 409;", "case CmdErr::NotCommandable: return 400;"),
+    ("http 503", "case CmdErr::QueueFull: return 503;", "case CmdErr::QueueFull: return 400;"),
+    ("http ok 202", "case CmdErr::Ok: return 202;", "case CmdErr::Ok: return 200;"),
+    ("err code busy", 'case CmdErr::QueueFull: return "busy";', 'case CmdErr::QueueFull: return "full";'),
+    ("err code not_found", 'case CmdErr::NotFound: return "not_found";', 'case CmdErr::NotFound: return "missing";'),
+    ("err field action", 'case CmdErr::BadAction: return "action";', 'case CmdErr::BadAction: return "id";'),
+    ("err field value", 'case CmdErr::BadValue: return "value";', 'case CmdErr::BadValue: return "id";'),
 ]
 
-def run_tests():
-    r = subprocess.run([sys.executable, "-m", "platformio", "test", "-e", "native", "-f", "test_devices"],
+QUEUE = [
+    ("full check", "if (next == tail_) return false;", ""),
+    ("push advances", "head_ = next;\n    return true;", "return true;"),
+    ("pop empty", "if (tail_ == head_) return false;", ""),
+    ("pop advances", "tail_ = (tail_ + 1) % N;", ""),
+    ("replace direction", "i = (i + N - 1) % N;", "i = (i + 1) % N;"),
+    ("replace condition", "if (same(items_[i])) { items_[i] = v; return true; }", "if (!same(items_[i])) { items_[i] = v; return true; }"),
+    ("replace always misses", "if (same(items_[i])) { items_[i] = v; return true; }", "if (same(items_[i])) { return true; }"),
+    ("size", "return (head_ + N - tail_) % N;", "return (head_ - tail_) % N;"),
+]
+
+LIMITER = [
+    ("window reset", "if (uint32_t(now - windowStart) >= windowMs) { windowStart = now; count = 0; }", "if (uint32_t(now - windowStart) >= windowMs) { windowStart = now; }"),
+    ("window edge", "uint32_t(now - windowStart) >= windowMs", "uint32_t(now - windowStart) > windowMs"),
+    ("limit edge", "if (count >= maxPerWindow) return false;", "if (count > maxPerWindow) return false;"),
+    ("count", "count++;\n    return true;", "return true;"),
+]
+
+SETS = [
+    ("devices", "src/devices/DeviceTypes.h", "test_devices", DEVICES),
+    ("queue", "src/devices/OpQueue.h", "test_ws", QUEUE),
+    ("limiter", "src/net/RateLimiter.h", "test_ws", LIMITER),
+]
+
+def run_tests(folder):
+    r = subprocess.run([sys.executable, "-m", "platformio", "test", "-e", "native", "-f", folder],
                        cwd=ROOT, capture_output=True, text=True)
     return r.returncode == 0
 
-original = open(FILE, encoding="utf-8", newline="").read()
-if not run_tests():
-    print("BASELINE FAILS: fix the tests first"); sys.exit(1)
+survivors, total = [], 0
+for label, rel, folder, mutants in SETS:
+    path = os.path.join(ROOT, rel)
+    original = open(path, encoding="utf-8", newline="").read()
+    if not run_tests(folder):
+        print(f"BASELINE FAILS for {label}: fix the tests first"); sys.exit(1)
+    try:
+        for name, old, new in mutants:
+            total += 1
+            if original.count(old) != 1:
+                print(f"BAD MUTANT {label}/{name} (pattern found {original.count(old)}x)"); survivors.append(f"{label}/{name}"); continue
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write(original.replace(old, new))
+            caught = not run_tests(folder)
+            print(("caught   " if caught else "SURVIVED ") + f"{label}/{name}")
+            if not caught: survivors.append(f"{label}/{name}")
+    finally:
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(original)
+        os.utime(path, (time.time(), time.time()))  # restored file must look newer or the build reuses the mutant
+    if not run_tests(folder):
+        print(f"RESTORE FAILED for {label}"); sys.exit(1)
 
-survivors = []
-try:
-    for name, old, new in MUTANTS:
-        if original.count(old) != 1:
-            print(f"BAD MUTANT (pattern found {original.count(old)}x): {name}"); survivors.append(name); continue
-        with open(FILE, "w", encoding="utf-8", newline="") as f:
-            f.write(original.replace(old, new))
-        caught = not run_tests()
-        print(("caught   " if caught else "SURVIVED ") + name)
-        if not caught: survivors.append(name)
-finally:
-    with open(FILE, "w", encoding="utf-8", newline="") as f:
-        f.write(original)
-    os.utime(FILE, (time.time(), time.time()))  # restored file must look newer or the build reuses the mutant
-
-if not run_tests():
-    print("RESTORE FAILED"); sys.exit(1)
-print(f"{len(MUTANTS) - len(survivors)}/{len(MUTANTS)} caught")
+print(f"{total - len(survivors)}/{total} caught")
 sys.exit(1 if survivors else 0)

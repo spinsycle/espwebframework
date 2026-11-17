@@ -6,9 +6,11 @@
 #include <LittleFS.h>
 
 #include "core/Framework.h"
+#include "devices/CommandJson.h"
 #include "devices/DeviceRegistry.h"
 #include "devices/DeviceStore.h"
 #include "net/NetworkStore.h"
+#include "net/WsHub.h"
 
 namespace espwf {
 
@@ -33,8 +35,9 @@ static void sendDevErr(AsyncWebServerRequest* r, DevErr e) {
   sendError(r, statusFor(e), devErrCode(e), devErrField(e));
 }
 
-void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry& devices) {
+void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry& devices, WsHub& ws) {
   server_ = new AsyncWebServer(80);
+  ws.attach(*server_, fw, devices);  // before the static-file handler, which would otherwise answer /ws
   FrameworkController* f = &fw;
   NetworkManager* n = &net;
   DeviceRegistry* dv = &devices;
@@ -126,25 +129,12 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry
   server_->addHandler(add);
 
   auto* command = new AsyncCallbackJsonWebHandler("/api/v1/command", [dv](AsyncWebServerRequest* r, JsonVariant& json) {
-    const char* id = json["id"].is<const char*>() ? json["id"].as<const char*>() : nullptr;
+    const char* id = nullptr;
     Command c;
-    if (!id || !parseAction(json["action"].as<const char*>(), c.action)) {
-      sendError(r, 400, id ? "bad_action" : "bad_id", id ? "action" : "id");
-      return;
-    }
-    JsonVariantConst val = json["value"];
-    if (!val.isNull()) {
-      c.hasValue = true;
-      c.isBool = val.is<bool>();
-      c.value = c.isBool ? (val.as<bool>() ? 1 : 0) : val.is<double>() ? val.as<double>() : 0;
-      if (!c.isBool && !val.is<double>()) c.hasValue = false;  // a string or object is "no usable value"
-    }
-    CmdErr e = dv->requestCommand(id, c);
+    CmdErr e = parseCommandJson(json, id, c);
+    if (e == CmdErr::Ok) e = dv->requestCommand(id, c);
     if (e != CmdErr::Ok) {
-      int code = e == CmdErr::NotFound ? 404 : e == CmdErr::NotCommandable ? 409 : e == CmdErr::QueueFull ? 503 : 400;
-      const char* name = e == CmdErr::NotFound ? "not_found" : e == CmdErr::NotCommandable ? "not_commandable"
-                       : e == CmdErr::QueueFull ? "busy" : e == CmdErr::BadAction ? "bad_action" : "bad_value";
-      sendError(r, code, name, e == CmdErr::BadValue ? "value" : e == CmdErr::BadAction ? "action" : "id");
+      sendError(r, cmdErrHttp(e), cmdErrCode(e), cmdErrField(e));
       return;
     }
     JsonDocument d;

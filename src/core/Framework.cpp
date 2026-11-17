@@ -28,13 +28,14 @@ bool FrameworkController::begin() {
     Serial.println("[espwf] no valid network config, using defaults");
   }
   net_.begin(cfg);
-  http_.begin(*this, net_, devices_);
+  http_.begin(*this, net_, devices_, ws_);
   Serial.printf("[espwf] ready, AP '%s'\n", cfg.apSsid);
   return true;
 }
 
 void FrameworkController::loop() {
   devices_.loop();
+  ws_.loop();
   net_.loop();
   if (restartPending_ && int32_t(millis() - restartAt_) >= 0) hal::restart();
 }
@@ -73,6 +74,6 @@ void FrameworkController::getStatus(JsonObject out) const {
   JsonObject fs = out["filesystem"].to<JsonObject>();
   fs["used"] = hal::fsUsed();
   fs["total"] = hal::fsTotal();
-  out["ws_clients"] = 0;  // WebSocket arrives in P3
+  out["ws_clients"] = ws_.clientCount();
   net_.status(out["network"].to<JsonObject>());
 }

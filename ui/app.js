@@ -20,13 +20,13 @@ document.querySelectorAll("#tabs button").forEach((b) =>
   b.addEventListener("click", () => {
     document.querySelectorAll("#tabs button").forEach((x) => x.classList.toggle("on", x === b));
     document.querySelectorAll("main > section").forEach((s) => (s.hidden = s.id !== b.dataset.tab));
-    if (b.dataset.tab === "dev") loadDevices();
+    if (b.dataset.tab === "dev") showDevices();
     if (b.dataset.tab === "net") loadNet();
     if (b.dataset.tab === "sys") loadSys();
   })
 );
 
-// ---- dashboard (polling; WebSocket replaces this in P3)
+// ---- dashboard status
 function renderStatus(s) {
   $("uptime").textContent = fmtUp(s.uptime_s);
   $("heap").textContent = fmtBytes(s.heap.free) + " free";
@@ -36,28 +36,89 @@ function renderStatus(s) {
   $("ap").textContent = n.ap.active ? n.ap.ssid + " @ " + n.ap.ip + " (" + n.ap.clients + " clients)" : "off";
   $("sta").textContent = !n.sta.enabled ? "off" : n.sta.connected ? n.sta.ssid + " @ " + n.sta.ip + " (" + n.sta.rssi + " dBm)" : "connecting to " + n.sta.ssid + ": " + n.sta.reason + " (code " + n.sta.code + ")";
   $("reset").textContent = s.reset_reason;
+  $("wsc").textContent = s.ws_clients + " open";
 }
 
+const setOnline = (on) => {
+  $("online").className = "dot" + (on ? "" : " off");
+  $("online").title = on ? "online" : "offline";
+};
+
+// ---- live connection: a WebSocket pushes status and device state; polling is only the fallback
+let ws = null, wsLive = false, wsRetryMs = 1000, wsLastRx = 0, wsBuf = null;
+
+function wsSend(obj) {
+  if (!ws || ws.readyState !== 1) return false;
+  ws.send(JSON.stringify(obj));
+  return true;
+}
+
+function connectWs() {
+  const sock = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+  ws = sock;
+  sock.onmessage = (ev) => {
+    wsLastRx = Date.now();
+    let m;
+    try { m = JSON.parse(ev.data); } catch (e) { return; }
+    if (m.event === "hello") {
+      wsLive = true;
+      wsRetryMs = 1000;
+      setOnline(true);
+      wsBuf = [];  // events that arrive while the list is being fetched wait their turn
+      fetchDevices().finally(() => { const b = wsBuf || []; wsBuf = null; b.forEach(handleWs); });
+    } else if (wsBuf) wsBuf.push(m);
+    else handleWs(m);
+  };
+  sock.onclose = () => {
+    if (ws === sock) { ws = null; wsLive = false; wsBuf = null; }
+    setTimeout(connectWs, wsRetryMs);
+    wsRetryMs = Math.min(wsRetryMs * 2, 5000);  // back off, but never wait long: the board may be restarting
+  };
+  sock.onerror = () => sock.close();
+}
+
+function handleWs(m) {
+  if (m.event === "status") renderStatus(m);
+  else if (m.event === "devices_changed") fetchDevices();
+  else if (m.event === "device_state") {
+    const d = devices.find((x) => x.id === m.id);
+    if (d) { d.state = m.state; renderDevices(); }
+  } else if (m.event === "error") {
+    const msg = $("devmsg");
+    msg.className = "err";
+    msg.textContent = "Rejected: " + m.error + (m.field ? " (" + m.field + ")" : "");
+    setTimeout(() => { if (msg.className === "err") msg.textContent = ""; }, 5000);
+  }
+}
+
+setInterval(() => {  // heartbeat: a half-open socket (Wi-Fi dropped) stays "open" in the browser until we notice
+  if (!wsLive) return;
+  wsSend({ type: "ping" });
+  if (Date.now() - wsLastRx > 25000 && ws) ws.close();
+}, 10000);
+
 async function poll() {
-  try {
-    renderStatus(await api("/status"));
-    $("online").className = "dot";
-    $("online").title = "online";
-  } catch (e) {
-    $("online").className = "dot off";
-    $("online").title = "offline";
+  if (!wsLive) {
+    try { renderStatus(await api("/status")); setOnline(true); } catch (e) { setOnline(false); }
   }
   setTimeout(poll, 2000);
 }
 
-// ---- devices (polling; WebSocket replaces this in P3)
-const cmd = (id, action, value) =>
-  api("/command", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value === undefined ? { id, action } : { id, action, value }) });
+// ---- devices
+let devices = [];
 
 function el(tag, props, ...kids) {
   const e = Object.assign(document.createElement(tag), props || {});
   e.append(...kids);
   return e;
+}
+
+function command(id, action, value) {
+  const m = { type: "command", id, action };
+  if (value !== undefined) m.value = value;
+  if (wsSend(m)) return Promise.resolve();  // the answer arrives as a device_state event
+  return api("/command", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, action, value }) })
+    .then(() => setTimeout(fetchDevices, 200));
 }
 
 function devCard(d) {
@@ -67,39 +128,54 @@ function devCard(d) {
   if (d.type === "relay") {
     const on = d.state.on;
     const b = el("button", { type: "button", className: "tgl" + (on ? " on" : ""), textContent: on ? "ON" : "OFF" });
-    b.onclick = async () => { await cmd(d.id, "toggle").catch(() => {}); setTimeout(loadDevices, 150); };
+    b.onclick = () => command(d.id, "toggle").catch(() => {});
     body.append(b);
   } else if (d.type === "pwm") {
     const out = el("span", { textContent: d.state.duty + " %" });
     const r = el("input", { type: "range", min: 0, max: 100, value: d.state.duty });
-    r.oninput = () => (out.textContent = r.value + " %");
-    r.onchange = () => cmd(d.id, "set", +r.value).catch(() => {});
+    let last = 0;
+    r.oninput = () => {
+      out.textContent = r.value + " %";
+      const now = performance.now();
+      if (now - last > 60) { last = now; command(d.id, "set", +r.value).catch(() => {}); }  // live while dragging, ~16/s
+    };
+    r.onchange = () => { command(d.id, "set", +r.value).catch(() => {}); r.blur(); };  // final value; blur lets updates redraw
     body.append(out, r);
   } else {
     body.append(el("p", { textContent: d.state.active ? "ACTIVE" : "inactive" }), el("small", { textContent: d.state.edges + " changes" }));
   }
   const rm = el("button", { type: "button", className: "rm", textContent: "remove" });
   rm.onclick = async () => {
-    if (confirm("Remove " + d.name + "?")) { await api("/devices?id=" + encodeURIComponent(d.id), { method: "DELETE" }).catch(() => {}); setTimeout(loadDevices, 250); }
+    if (!confirm("Remove " + d.name + "?")) return;
+    await api("/devices?id=" + encodeURIComponent(d.id), { method: "DELETE" }).catch(() => {});
+    if (!wsLive) setTimeout(fetchDevices, 250);
   };
   const card = el("div", { className: "card dev" }, top, body, rm);
   if (d.boot_sensitive) card.append(el("small", { className: "warn", textContent: "Boot-sensitive pin: a wire here can stop the board booting." }));
   return card;
 }
 
+const sliderInUse = () => document.activeElement && document.activeElement.type === "range";
+
+function renderDevices() {
+  if ($("dev").hidden) return;
+  $("devempty").hidden = devices.length > 0;
+  if (sliderInUse()) return;  // don't redraw under a slider being dragged
+  $("devlist").replaceChildren(...devices.map(devCard));
+}
+
+async function fetchDevices() {
+  try { devices = (await api("/devices")).devices; renderDevices(); } catch (e) { /* the offline dot shows it */ }
+}
+
 let devTimer = 0;
-async function loadDevices() {
+function showDevices() {
   clearTimeout(devTimer);
   if ($("dev").hidden) return;
-  try {
-    const { devices } = await api("/devices");
-    $("devempty").hidden = devices.length > 0;
-    if (!document.activeElement || document.activeElement.type !== "range") {  // don't fight a slider being dragged
-      $("devlist").replaceChildren(...devices.map(devCard));
-    }
-  } catch (e) { /* offline dot already shows it */ }
-  devTimer = setTimeout(loadDevices, 1500);
+  if (wsLive) { renderDevices(); return; }  // already live from the socket
+  fetchDevices().finally(() => (devTimer = setTimeout(showDevices, 1500)));  // fallback: poll
 }
+
 
 function syncDevForm() {
   const f = $("devform").elements, t = f.type.value;
@@ -123,7 +199,7 @@ $("devform").addEventListener("submit", async (e) => {
     msg.textContent = "Added.";
     $("devform").reset();
     syncDevForm();
-    setTimeout(loadDevices, 250);
+    if (!wsLive) setTimeout(fetchDevices, 250);
   } catch (err) {
     msg.className = "err";
     msg.textContent = "Rejected: " + err.message + (err.field ? " (" + err.field + ")" : "");
@@ -199,4 +275,5 @@ $("restart").addEventListener("click", async () => {
 });
 
 api("/system").then((s) => ($("devname").textContent = s.device.name)).catch(() => {});
+connectWs();
 poll();

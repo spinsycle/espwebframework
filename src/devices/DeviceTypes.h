@@ -166,7 +166,37 @@ inline DevErr validateDevice(const DeviceConfig& c, Chip chip, const DeviceConfi
 // ---- commands -------------------------------------------------------------------------------
 
 enum class CmdAction : uint8_t { None, Set, Toggle };
-enum class CmdErr : uint8_t { Ok, NotFound, NotCommandable, BadAction, BadValue, QueueFull };
+enum class CmdErr : uint8_t { Ok, NotFound, NotCommandable, BadAction, BadValue, QueueFull, BadId };
+
+// One place for how a command error is named and which HTTP status it maps to (REST and WebSocket share it).
+inline const char* cmdErrCode(CmdErr e) {
+  switch (e) {
+    case CmdErr::Ok: return "";
+    case CmdErr::NotFound: return "not_found";
+    case CmdErr::NotCommandable: return "not_commandable";
+    case CmdErr::BadAction: return "bad_action";
+    case CmdErr::BadValue: return "bad_value";
+    case CmdErr::QueueFull: return "busy";
+    default: return "bad_id";
+  }
+}
+inline const char* cmdErrField(CmdErr e) {
+  switch (e) {
+    case CmdErr::BadAction: return "action";
+    case CmdErr::BadValue: return "value";
+    case CmdErr::Ok: return "";
+    default: return "id";
+  }
+}
+inline int cmdErrHttp(CmdErr e) {
+  switch (e) {
+    case CmdErr::Ok: return 202;
+    case CmdErr::NotFound: return 404;
+    case CmdErr::NotCommandable: return 409;
+    case CmdErr::QueueFull: return 503;
+    default: return 400;
+  }
+}
 
 struct Command {
   CmdAction action = CmdAction::None;

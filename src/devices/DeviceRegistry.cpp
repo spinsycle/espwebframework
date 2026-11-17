@@ -39,19 +39,20 @@ int DeviceRegistry::find(const char* id) const {
 
 bool DeviceRegistry::push(const Op& op) {
   hal::CriticalSection cs;
-  size_t next = (qHead_ + 1) % kQueue;
-  if (next == qTail_) return false;
-  queue_[qHead_] = op;
-  qHead_ = next;
-  return true;
+  if (op.kind == Op::Cmd && op.cmd.action == CmdAction::Set) {
+    // A slider drag sends many "set" values for one device: only the latest matters, so it takes the
+    // place of the one already waiting instead of filling the queue.
+    bool merged = queue_.replaceNewestIf(op, [&op](const Op& q) {
+      return q.kind == Op::Cmd && q.cmd.action == CmdAction::Set && !strcmp(q.id, op.id);
+    });
+    if (merged) return true;
+  }
+  return queue_.push(op);
 }
 
 bool DeviceRegistry::pop(Op& op) {
   hal::CriticalSection cs;
-  if (qTail_ == qHead_) return false;
-  op = queue_[qTail_];
-  qTail_ = (qTail_ + 1) % kQueue;
-  return true;
+  return queue_.pop(op);
 }
 
 DevErr DeviceRegistry::requestAdd(const DeviceConfig& c) {
@@ -91,14 +92,17 @@ CmdErr DeviceRegistry::requestCommand(const char* id, const Command& cmd) {
   return push(op) ? CmdErr::Ok : CmdErr::QueueFull;
 }
 
-void DeviceRegistry::describe(const DeviceView& v, JsonObject out) {
-  DeviceStore::toJson(v.cfg, out);
-  JsonObject st = out["state"].to<JsonObject>();
+void DeviceRegistry::describeState(const DeviceView& v, JsonObject st) {
   switch (v.cfg.type) {
     case DeviceType::Relay: st["on"] = v.on; break;
     case DeviceType::Input: st["active"] = v.on; st["edges"] = v.edges; break;
     default: st["duty"] = v.duty; break;
   }
+}
+
+void DeviceRegistry::describe(const DeviceView& v, JsonObject out) {
+  DeviceStore::toJson(v.cfg, out);
+  describeState(v, out["state"].to<JsonObject>());
   if (pinBootSensitive(kChip, v.cfg.pin)) out["boot_sensitive"] = true;
 }
 
@@ -166,6 +170,7 @@ void DeviceRegistry::doAdd(const DeviceConfig& c) {
   {
     hal::CriticalSection cs;
     n_++;
+    structVer_ = structVer_ + 1;
   }
   bool saved = DeviceStore::save(cfg_, n_);
   Serial.printf("[dev] added %s '%s' on pin %d (saved=%d)\n", deviceTypeName(c.type), c.id, c.pin, saved);
@@ -180,6 +185,7 @@ void DeviceRegistry::doRemove(const char* id) {
     hal::CriticalSection cs;
     for (size_t k = i + 1; k < n_; k++) { cfg_[k - 1] = cfg_[k]; rt_[k - 1] = rt_[k]; }
     n_--;
+    structVer_ = structVer_ + 1;
   }
   bool saved = DeviceStore::save(cfg_, n_);
   Serial.printf("[dev] removed '%s' (saved=%d)\n", id, saved);
@@ -195,6 +201,7 @@ void DeviceRegistry::doCommand(const char* id, const Command& cmd) {
     {
       hal::CriticalSection cs;
       rt_[i].on = on;
+      stateVer_ = stateVer_ + 1;
     }
     driveRelay(i);
   } else {
@@ -202,6 +209,7 @@ void DeviceRegistry::doCommand(const char* id, const Command& cmd) {
     {
       hal::CriticalSection cs;
       rt_[i].duty = duty;
+      stateVer_ = stateVer_ + 1;
     }
     drivePwm(i);
   }
@@ -217,6 +225,7 @@ void DeviceRegistry::pollInputs() {
         hal::CriticalSection cs;
         rt_[i].on = rt_[i].deb.stable;
         rt_[i].edges++;
+        stateVer_ = stateVer_ + 1;
       }
       Serial.printf("[dev] '%s' %s\n", cfg_[i].id, rt_[i].on ? "active" : "inactive");
     }
