@@ -79,7 +79,12 @@ inline bool parseModel(DeviceType t, const char* s, uint8_t& out) {
 
 constexpr unsigned kIdCap = 17;    // 16 chars + NUL
 constexpr unsigned kNameCap = 25;  // 24 chars + NUL
+// Memory is the limit on the ESP8266: each device costs about 170 bytes of RAM for as long as the board runs.
+#if defined(ESP8266)
+constexpr size_t kMaxDevices = 16;
+#else
 constexpr size_t kMaxDevices = 32;
+#endif
 constexpr size_t kMaxPwm = 8;      // counts pwm, motor and direct-pin servo devices
 constexpr unsigned kTextCap = 48;  // serial text: 47 chars + NUL      // ESP8266 software PWM and the ESP32 LEDC low-speed group both fit 8
 

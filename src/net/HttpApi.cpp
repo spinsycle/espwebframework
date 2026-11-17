@@ -17,6 +17,7 @@
 #include "devices/DeviceRegistry.h"
 #include "devices/DeviceStore.h"
 #include "net/NetworkStore.h"
+#include "net/Chunker.h"
 #include "net/Ota.h"
 #include "net/Token.h"
 #include "net/WsHub.h"
@@ -54,6 +55,9 @@ static void otaFail(const char* why) {
   copyStr(gOtaErr, why, sizeof gOtaErr);
   if (gOtaStarted) { espwf::Ota::abort(); gOtaStarted = false; }
 }
+
+
+// ---- big replies are built a piece at a time (see Chunker.h): one JSON document per list item
 
 static int statusFor(AutoErr e) {
   switch (e) {
@@ -126,18 +130,16 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry
 
   // ---- devices. Config changes and commands are queued (202); loop() applies them.
   server_->on("/api/v1/devices", HTTP_GET, [dv](AsyncWebServerRequest* r) {
-    AsyncResponseStream* s = r->beginResponseStream("application/json");
-    s->addHeader("Cache-Control", "no-store");
-    s->print("{\"devices\":[");
-    DeviceView v;
-    for (size_t i = 0; dv->view(i, v); i++) {  // one device per small document: no big heap block
+    auto c = std::make_shared<Chunker>("{");
+    c->add("\"devices\":[", [dv](size_t i, String& out) {
+      DeviceView v;
+      if (!dv->view(i, v)) return false;
       JsonDocument d;
       DeviceRegistry::describe(v, d.to<JsonObject>());
-      if (i) s->print(',');
-      serializeJson(d, *s);
-    }
-    s->print("]}");
-    r->send(s);
+      serializeJson(d, out);
+      return true;
+    });
+    sendChunked(r, c);
   });
 
   server_->on("/api/v1/devices", HTTP_DELETE, [dv](AsyncWebServerRequest* r) {
@@ -171,21 +173,20 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry
 
   // ---- config: export, import (replace all devices), factory reset. No auth until P8.
   server_->on("/api/v1/config/export", HTTP_GET, [dv](AsyncWebServerRequest* r) {
-    AsyncResponseStream* s = r->beginResponseStream("application/json");
-    s->addHeader("Cache-Control", "no-store");
-    s->addHeader("Content-Disposition", "attachment; filename=\"espwf-config.json\"");
     char v[16];
     versionString(v, sizeof v);
-    s->printf("{\"schema_version\":%d,\"framework_version\":\"%s\",\"chip\":\"%s\",\"devices\":[", kConfigSchema, v, hal::chipName());
-    DeviceView dvw;
-    for (size_t i = 0; dv->view(i, dvw); i++) {  // config only, no live state, no Wi-Fi passwords (network is not part of it)
+    char head[120];
+    snprintf(head, sizeof head, "{\"schema_version\":%d,\"framework_version\":\"%s\",\"chip\":\"%s\"", kConfigSchema, v, hal::chipName());
+    auto c = std::make_shared<Chunker>(head);
+    c->add(",\"devices\":[", [dv](size_t i, String& out) {  // config only, no live state, no Wi-Fi passwords (network is not part of it)
+      DeviceView dvw;
+      if (!dv->view(i, dvw)) return false;
       JsonDocument d;
       DeviceStore::toJson(dvw.cfg, d.to<JsonObject>());
-      if (i) s->print(',');
-      serializeJson(d, *s);
-    }
-    s->print("]}");
-    r->send(s);
+      serializeJson(d, out);
+      return true;
+    });
+    sendChunked(r, c, "Content-Disposition", "attachment; filename=\"espwf-config.json\"");
   });
 
   auto* imp = new AsyncCallbackJsonWebHandler("/api/v1/config/import", [dv](AsyncWebServerRequest* r, JsonVariant& json) {
@@ -430,17 +431,14 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry
 
   // ---- sequences and timers. Longer paths first: this server matches a route as a prefix of longer ones.
   server_->on("/api/v1/automation/timers", HTTP_GET, [at](AsyncWebServerRequest* r) {  // light: the dashboard polls it
-    AsyncResponseStream* s = r->beginResponseStream("application/json");
-    s->addHeader("Cache-Control", "no-store");
-    s->print("{\"timers\":[");
-    for (size_t i = 0;; i++) {
+    auto c = std::make_shared<Chunker>("{");
+    c->add("\"timers\":[", [at](size_t i, String& out) {
       JsonDocument d;
-      if (!at->describeTimer(i, d.to<JsonObject>())) break;
-      if (i) s->print(',');
-      serializeJson(d, *s);
-    }
-    s->print("]}");
-    r->send(s);
+      if (!at->describeTimer(i, d.to<JsonObject>())) return false;
+      serializeJson(d, out);
+      return true;
+    });
+    sendChunked(r, c);
   });
 
   struct CtlRoute { const char* path; bool seq; AutomationCore::Ctl op; };
@@ -515,87 +513,54 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry
   }
 
   server_->on("/api/v1/automation/status", HTTP_GET, [at](AsyncWebServerRequest* r) {
-    AsyncResponseStream* s = r->beginResponseStream("application/json");
-    s->addHeader("Cache-Control", "no-store");
+    String head;
     {
       JsonDocument d;
       at->describeStatusHead(d.to<JsonObject>());
-      String head;
       serializeJson(d, head);
-      head.remove(head.length() - 1);
-      s->print(head);
-      s->print(",\"status\":[");
+      head.remove(head.length() - 1);  // without the closing brace: the lists follow
     }
-    for (size_t i = 0;; i++) {
-      JsonDocument d;
-      if (!at->describeRule(i, d.to<JsonObject>())) break;
-      if (i) s->print(',');
-      serializeJson(d, *s);
-    }
-    s->print("],\"events\":[");
-    for (size_t i = 0;; i++) {
-      JsonDocument d;
-      if (!at->describeEvent(i, d.to<JsonObject>())) break;
-      if (i) s->print(',');
-      serializeJson(d, *s);
-    }
-    s->print("],\"sequences\":[");
-    for (size_t i = 0;; i++) {
-      JsonDocument d;
-      if (!at->describeSeq(i, d.to<JsonObject>())) break;
-      if (i) s->print(',');
-      serializeJson(d, *s);
-    }
-    s->print("],\"timers\":[");
-    for (size_t i = 0;; i++) {
-      JsonDocument d;
-      if (!at->describeTimer(i, d.to<JsonObject>())) break;
-      if (i) s->print(',');
-      serializeJson(d, *s);
-    }
-    s->print("]}");
-    r->send(s);
+    auto c = std::make_shared<Chunker>(head);
+    c->add(",\"status\":[", [at](size_t i, String& out) { JsonDocument d; if (!at->describeRule(i, d.to<JsonObject>())) return false; serializeJson(d, out); return true; });
+    c->add(",\"events\":[", [at](size_t i, String& out) { JsonDocument d; if (!at->describeEvent(i, d.to<JsonObject>())) return false; serializeJson(d, out); return true; });
+    c->add(",\"sequences\":[", [at](size_t i, String& out) { JsonDocument d; if (!at->describeSeq(i, d.to<JsonObject>())) return false; serializeJson(d, out); return true; });
+    c->add(",\"timers\":[", [at](size_t i, String& out) { JsonDocument d; if (!at->describeTimer(i, d.to<JsonObject>())) return false; serializeJson(d, out); return true; });
+    sendChunked(r, c);
   });
 
   server_->on("/api/v1/automation", HTTP_GET, [at](AsyncWebServerRequest* r) {
-    AsyncResponseStream* s = r->beginResponseStream("application/json");
-    s->addHeader("Cache-Control", "no-store");
+    String head;
     {
       JsonDocument d;
       AutomationStore::settingsToJson(at->settings(), d.to<JsonObject>());
       d["schema_version"] = kConfigSchema;
-      String head;
       serializeJson(d, head);
-      head.remove(head.length() - 1);  // without the closing brace: the rules follow
-      s->print(head);
-      s->print(",\"rules\":[");
+      head.remove(head.length() - 1);  // without the closing brace: the lists follow
     }
-    Rule* rule = new (std::nothrow) Rule;  // one rule at a time, off the small stack
-    for (size_t i = 0; rule && at->ruleAt(i, *rule); i++) {
+    auto c = std::make_shared<Chunker>(head);
+    c->add(",\"rules\":[", [at](size_t i, String& out) {
+      std::unique_ptr<Rule> rule(new (std::nothrow) Rule);  // about 340 bytes, only for the moment it is written
+      if (!rule || !at->ruleAt(i, *rule)) return false;
       JsonDocument d;
       AutomationStore::ruleToJson(*rule, d.to<JsonObject>());
-      if (i) s->print(',');
-      serializeJson(d, *s);
-    }
-    delete rule;
-    s->print("],\"timers\":[");  // the stored definitions, plus the live state a timer card needs
-    for (size_t i = 0;; i++) {
+      serializeJson(d, out);
+      return true;
+    });
+    c->add(",\"timers\":[", [at](size_t i, String& out) {  // the stored definitions, plus the live state a timer card needs
       JsonDocument d;
-      if (!at->describeTimer(i, d.to<JsonObject>())) break;
-      if (i) s->print(',');
-      serializeJson(d, *s);
-    }
-    s->print("],\"sequences\":[");
-    SeqDef* q = new (std::nothrow) SeqDef;
-    for (size_t i = 0; q && at->seqAt(i, *q); i++) {
+      if (!at->describeTimer(i, d.to<JsonObject>())) return false;
+      serializeJson(d, out);
+      return true;
+    });
+    c->add(",\"sequences\":[", [at](size_t i, String& out) {
+      std::unique_ptr<SeqDef> q(new (std::nothrow) SeqDef);  // about 1.5 KB, only for the moment it is written
+      if (!q || !at->seqAt(i, *q)) return false;
       JsonDocument d;
       AutomationStore::seqToJson(*q, d.to<JsonObject>());
-      if (i) s->print(',');
-      serializeJson(d, *s);
-    }
-    delete q;
-    s->print("]}");
-    r->send(s);
+      serializeJson(d, out);
+      return true;
+    });
+    sendChunked(r, c);
   });
 
   auto* settings = new AsyncCallbackJsonWebHandler("/api/v1/automation/settings", [at](AsyncWebServerRequest* r, JsonVariant& json) {

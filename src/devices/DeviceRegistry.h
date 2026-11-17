@@ -89,7 +89,7 @@ class DeviceRegistry {
     char id[kIdCap] = {0};
     Command cmd;
   };
-  static constexpr size_t kQueue = 8;
+  static constexpr size_t kQueue = 6;
 
   int find(const char* id) const;  // -1 if absent; callable from any task (reads under no lock: ids only change in loop())
   bool push(const Op& op);

@@ -4,6 +4,13 @@
 #include <stdint.h>
 #include <string.h>
 
+#if defined(ESP8266) || defined(ESP32)
+#include <pgmspace.h>  // the round constants live in flash, not in the ESP8266's scarce RAM
+#else
+#define PROGMEM
+#define pgm_read_dword(p) (*(p))
+#endif
+
 namespace espwf {
 
 class Sha256 {
@@ -52,7 +59,7 @@ class Sha256 {
   static uint32_t rotr(uint32_t x, int n) { return (x >> n) | (x << (32 - n)); }
 
   void block(const uint8_t* p) {
-    static const uint32_t k[64] = {
+    static const uint32_t k[64] PROGMEM = {
         0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be,
         0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa,
         0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85,
@@ -71,7 +78,7 @@ class Sha256 {
     for (int i = 0; i < 64; i++) {
       uint32_t s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
       uint32_t ch = (e & f) ^ (~e & g);
-      uint32_t t1 = h + s1 + ch + k[i] + w[i];
+      uint32_t t1 = h + s1 + ch + pgm_read_dword(&k[i]) + w[i];
       uint32_t s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
       uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
       uint32_t t2 = s0 + maj;
