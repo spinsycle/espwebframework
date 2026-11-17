@@ -35,7 +35,7 @@
     <p id="devempty" class="hint">No devices yet. Add one below.</p>
     <div id="devlist" class="grid"></div>
     <form id="devform" autocomplete="off">
-      <h3>Add device</h3>
+      <h3 id="devtitle">Add device</h3>
       <label>ID <input name="id" maxlength="16" placeholder="relay1 (a-z 0-9 _ -)" required></label>
       <label>Name <input name="name" maxlength="24" placeholder="optional label"></label>
       <label>Type
@@ -97,7 +97,8 @@
           <select name="baud"><option>1200</option><option>2400</option><option>4800</option><option selected>9600</option><option>19200</option><option>38400</option><option>57600</option><option>115200</option></select>
         </label>
       </div>
-      <button type="submit">Add device</button>
+      <button type="submit" id="devsubmit">Add device</button>
+      <button type="button" id="devcancel" hidden>Cancel edit</button>
       <p id="devmsg" role="status"></p>
     </form>
     <div class="card" id="i2ccard">
@@ -142,6 +143,15 @@
 
   <section id="sys" hidden>
     <div class="card"><dl id="sysinfo"></dl></div>
+    <div class="card" id="cfgcard">
+      <h3>Configuration</h3>
+      <p class="hint">Export saves the device list (not Wi-Fi passwords). Import replaces every device and restarts the board.</p>
+      <a id="cfgexport" href="/api/v1/config/export" download="espwf-config.json">Export devices</a>
+      <label>Import file <input id="cfgfile" type="file" accept="application/json,.json"></label>
+      <button id="cfgimport" type="button">Import (replace all)</button>
+      <p id="cfgmsg" role="status"></p>
+      <button id="cfgreset" type="button" class="danger">Factory reset</button>
+    </div>
     <button id="restart" type="button" class="danger">Restart device</button>
   </section>
 </main>

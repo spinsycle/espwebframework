@@ -5,7 +5,7 @@ const API = "/api/v1";
 async function api(path, opts) {
   const r = await fetch(API + path, opts);
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw Object.assign(new Error(j.error || r.statusText), { field: j.field });
+  if (!r.ok) throw Object.assign(new Error(j.error || r.statusText), { field: j.field, body: j });
   return j;
 }
 
@@ -184,7 +184,9 @@ function devCard(d) {
     await api("/devices?id=" + encodeURIComponent(d.id), { method: "DELETE" }).catch(() => {});
     if (!wsLive) setTimeout(fetchDevices, 250);
   };
-  const card = el("div", { className: "card dev" }, top, body, rm);
+  const ed = el("button", { type: "button", className: "rm", textContent: "edit" });
+  ed.onclick = () => startEdit(d);
+  const card = el("div", { className: "card dev" }, top, body, ed, rm);
   if (d.boot_sensitive) card.append(el("small", { className: "warn", textContent: "Boot-sensitive pin: a wire here can stop the board booting." }));
   return card;
 }
@@ -230,6 +232,42 @@ $("devform").elements.smodel.addEventListener("change", syncDevForm);
 $("devform").elements.xmodel.addEventListener("change", syncDevForm);
 syncDevForm();
 
+let editing = null;  // id of the device being edited, or null when the form adds a new one
+
+function setEditMode(id) {
+  editing = id;
+  const f = $("devform").elements;
+  f.id.readOnly = f.type.disabled = !!id;
+  $("devtitle").textContent = id ? "Edit " + id : "Add device";
+  $("devsubmit").textContent = id ? "Save changes" : "Add device";
+  $("devcancel").hidden = !id;
+}
+
+function startEdit(d) {
+  const f = $("devform").elements, num = (v) => (v === undefined || v < 0 ? "" : v);
+  $("devform").reset();
+  setEditMode(d.id);
+  f.type.value = d.type;
+  f.smodel.value = d.type === "servo" ? d.model : "direct";
+  f.xmodel.value = d.type === "sensor" ? d.model : "ds18b20";
+  syncDevForm();
+  f.id.value = d.id; f.name.value = d.name; f.invert.checked = !!d.invert;
+  f.pin.value = num(d.pin); f.pin2.value = num(d.pin2); f.pin3.value = num(d.pin3);
+  if (d.pullup !== undefined) f.pullup.checked = d.pullup;
+  if (d.debounce_ms !== undefined) f.debounce_ms.value = d.debounce_ms;
+  if (d.long_ms !== undefined) f.long_ms.value = d.long_ms;
+  if (d.freq_hz !== undefined) f.freq_hz.value = d.freq_hz;
+  if (d.initial !== undefined) f.initial.value = d.initial;
+  if (d.min_us !== undefined) { f.min_us.value = d.min_us; f.max_us.value = d.max_us; }
+  if (d.channel !== undefined) f.channel.value = d.channel;
+  if (d.interval_s !== undefined) f.interval_s.value = d.interval_s;
+  if (d.baud !== undefined) f.baud.value = d.baud;
+  if (d.i2c_addr !== undefined) { f.saddr.value = "0x" + d.i2c_addr.toString(16); f.xaddr.value = d.i2c_addr; }
+  $("devmsg").textContent = "";
+  $("devform").scrollIntoView();
+}
+$("devcancel").onclick = () => { $("devform").reset(); setEditMode(null); syncDevForm(); $("devmsg").textContent = ""; };
+
 $("devform").addEventListener("submit", async (e) => {
   e.preventDefault();
   const f = $("devform").elements, t = f.type.value, msg = $("devmsg");
@@ -252,9 +290,10 @@ $("devform").addEventListener("submit", async (e) => {
   }
   msg.className = "";
   try {
-    await api("/devices", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    msg.textContent = "Added.";
+    await api("/devices", { method: editing ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    msg.textContent = editing ? "Saved." : "Added.";
     $("devform").reset();
+    setEditMode(null);
     syncDevForm();
     if (!wsLive) setTimeout(fetchDevices, 250);
   } catch (err) {
@@ -262,6 +301,31 @@ $("devform").addEventListener("submit", async (e) => {
     msg.textContent = "Rejected: " + err.message + (err.field ? " (" + err.field + ")" : "");
   }
 });
+
+// ---- config: import, factory reset
+$("cfgimport").onclick = async () => {
+  const file = $("cfgfile").files[0], msg = $("cfgmsg");
+  msg.className = "";
+  if (!file) { msg.textContent = "Choose a file first."; return; }
+  if (!confirm("Replace ALL devices with the ones in " + file.name + "? The board restarts.")) return;
+  try {
+    const r = await api("/config/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: await file.text() });
+    msg.textContent = "Imported " + r.devices + " device(s). Restarting...";
+  } catch (err) {
+    msg.className = "err";
+    const b = err.body || {};
+    msg.textContent = b.reason ? "Rejected at device " + (b.index + 1) + (b.id ? " '" + b.id + "'" : "") + ": " + b.reason + (b.field ? " (" + b.field + ")" : "") + ". Nothing was changed."
+      : "Rejected: " + err.message + (err.field ? " (" + err.field + ")" : "");
+  }
+};
+
+$("cfgreset").onclick = async () => {
+  if (!confirm("Delete ALL saved settings (devices and Wi-Fi) and restart? The board returns to its own access point with the default password.")) return;
+  try {
+    await api("/config/factory-reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirm: "factory-reset" }) });
+    $("cfgmsg").textContent = "Reset. The board is restarting in its own access point.";
+  } catch (err) { $("cfgmsg").className = "err"; $("cfgmsg").textContent = "Failed: " + err.message; }
+};
 
 // ---- I2C scan
 async function showScan() {

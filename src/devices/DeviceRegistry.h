@@ -24,6 +24,12 @@ struct DeviceView {  // a copy of one device, safe to read outside any lock
 
 enum class ScanErr : uint8_t { Ok, Busy, PinsInUse };
 
+// Result of validating a whole device list for import: which entry failed and why.
+struct ImportResult {
+  DevErr err = DevErr::Ok;
+  size_t index = 0;
+};
+
 class DeviceRegistry {
  public:
   void begin();  // load config, put every output into its safe boot state
@@ -31,6 +37,14 @@ class DeviceRegistry {
 
   DevErr requestAdd(const DeviceConfig& cfg);
   DevErr requestRemove(const char* id);
+  bool config(const char* id, DeviceConfig& out) const;  // current config of one device; false if absent
+  DevErr requestUpdate(const DeviceConfig& cfg);          // edit in place: same id and type, new settings
+
+  // Replace every device with `list` (already parsed). Validates all of it first; on any failure nothing
+  // changes. The swap itself happens in loop() and ends with restartRequested() turning true.
+  ImportResult requestImport(const DeviceConfig* list, size_t n);
+  bool restartRequested() const { return restart_; }
+  void halt() { restart_ = true; }  // stop applying changes (and saving) ahead of a restart
   CmdErr requestCommand(const char* id, const Command& cmd);
 
   // I2C bus scan: queued here, run in loop(); poll describeScan() for the result.
@@ -66,7 +80,7 @@ class DeviceRegistry {
     void* h = nullptr;  // DS18B20 line handle
   };
   struct Op {
-    enum Kind : uint8_t { Add, Remove, Cmd } kind = Add;
+    enum Kind : uint8_t { Add, Remove, Cmd, Update } kind = Add;
     DeviceConfig cfg;
     char id[kIdCap] = {0};
     Command cmd;
@@ -78,6 +92,8 @@ class DeviceRegistry {
   bool pop(Op& op);
   void doAdd(const DeviceConfig& c);
   void doRemove(const char* id);
+  void doUpdate(const DeviceConfig& c);
+  void doImport();
   void doCommand(const char* id, const Command& cmd);
   void startHw(size_t i);
   void stopHw(size_t i);
@@ -111,6 +127,11 @@ class DeviceRegistry {
   volatile bool scanDone_ = false;
   uint8_t found_[16] = {0};
   uint8_t nFound_ = 0;
+
+  // A pending import waits here until loop() writes it (heap, only while an import is in flight).
+  DeviceConfig* importList_ = nullptr;
+  size_t importN_ = 0;
+  volatile bool restart_ = false;
 
   OpQueue<Op, kQueue> queue_;
   volatile uint32_t stateVer_ = 0;

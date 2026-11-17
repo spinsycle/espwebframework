@@ -4,8 +4,12 @@
 #include <ESPAsyncWebServer.h>
 #include <AsyncJson.h>
 #include <LittleFS.h>
+#include <new>
 
+#include "config/ConfigRules.h"
 #include "core/Framework.h"
+#include "core/Version.h"
+#include "hal/Hal.h"
 #include "devices/CommandJson.h"
 #include "devices/DeviceRegistry.h"
 #include "devices/DeviceStore.h"
@@ -116,6 +120,95 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry
   });
 
   // ---- I2C bus scan: POST queues it, GET returns the last result (and whether one is running).
+  // Edit in place: the body is merged onto the device named by "id" (type cannot change).
+  auto* upd = new AsyncCallbackJsonWebHandler("/api/v1/devices", [dv](AsyncWebServerRequest* r, JsonVariant& json) {
+    const char* id = json["id"].is<const char*>() ? json["id"].as<const char*>() : "";
+    DeviceConfig c;
+    if (!dv->config(id, c)) { sendDevErr(r, DevErr::NotFound); return; }
+    bool hadInitial = !json["initial"].isNull();
+    uint8_t oldInitial = c.initial;
+    DevErr e = DeviceStore::applyJson(json, c);
+    if (e == DevErr::Ok && !hadInitial) c.initial = oldInitial;  // applyJson would reset a servo to centre
+    if (e == DevErr::Ok) e = dv->requestUpdate(c);
+    if (e != DevErr::Ok) { sendDevErr(r, e); return; }
+    JsonDocument d;
+    d["ok"] = true;
+    sendJson(r, d, 202);
+  });
+  upd->setMethod(HTTP_PUT);
+  upd->setMaxContentLength(512);
+  server_->addHandler(upd);
+
+  // ---- config: export, import (replace all devices), factory reset. No auth until P8.
+  server_->on("/api/v1/config/export", HTTP_GET, [dv](AsyncWebServerRequest* r) {
+    AsyncResponseStream* s = r->beginResponseStream("application/json");
+    s->addHeader("Cache-Control", "no-store");
+    s->addHeader("Content-Disposition", "attachment; filename=\"espwf-config.json\"");
+    char v[16];
+    versionString(v, sizeof v);
+    s->printf("{\"schema_version\":%d,\"framework_version\":\"%s\",\"chip\":\"%s\",\"devices\":[", kConfigSchema, v, hal::chipName());
+    DeviceView dvw;
+    for (size_t i = 0; dv->view(i, dvw); i++) {  // config only, no live state, no Wi-Fi passwords (network is not part of it)
+      JsonDocument d;
+      DeviceStore::toJson(dvw.cfg, d.to<JsonObject>());
+      if (i) s->print(',');
+      serializeJson(d, *s);
+    }
+    s->print("]}");
+    r->send(s);
+  });
+
+  auto* imp = new AsyncCallbackJsonWebHandler("/api/v1/config/import", [dv](AsyncWebServerRequest* r, JsonVariant& json) {
+    if (!DeviceStore::schemaOk(json)) { sendError(r, 400, "unsupported_schema", "schema_version"); return; }
+    JsonArrayConst arr = json["devices"].as<JsonArrayConst>();
+    if (!json["devices"].is<JsonArrayConst>()) { sendError(r, 400, "bad_format", "devices"); return; }
+    size_t n = arr.size();
+    if (n > kMaxDevices) { sendError(r, 400, "too_many_devices", "devices"); return; }
+    DeviceConfig* list = new (std::nothrow) DeviceConfig[n ? n : 1];
+    if (!list) { sendError(r, 503, "out_of_memory"); return; }
+    ImportResult res;
+    size_t i = 0;
+    for (JsonVariantConst item : arr) {
+      DevErr e = DeviceStore::applyJson(item, list[i]);
+      if (e != DevErr::Ok) { res.err = e; res.index = i; break; }
+      i++;
+    }
+    if (res.err == DevErr::Ok) res = dv->requestImport(list, n);
+    if (res.err != DevErr::Ok) {
+      JsonDocument d;
+      d["error"] = "import_rejected";
+      d["index"] = res.index;
+      d["id"] = res.index < n ? list[res.index].id : "";
+      d["reason"] = devErrCode(res.err);
+      d["field"] = devErrField(res.err);
+      sendJson(r, d, 400);
+      delete[] list;
+      return;
+    }
+    delete[] list;
+    JsonDocument d;
+    d["ok"] = true;
+    d["devices"] = n;
+    d["restarting"] = true;
+    sendJson(r, d, 202);
+  });
+  imp->setMethod(HTTP_POST);
+  imp->setMaxContentLength(6144);
+  server_->addHandler(imp);
+
+  auto* reset = new AsyncCallbackJsonWebHandler("/api/v1/config/factory-reset", [f](AsyncWebServerRequest* r, JsonVariant& json) {
+    const char* c = json["confirm"].is<const char*>() ? json["confirm"].as<const char*>() : "";
+    if (strcmp(c, "factory-reset")) { sendError(r, 400, "confirm_required", "confirm"); return; }
+    f->requestFactoryReset();
+    JsonDocument d;
+    d["ok"] = true;
+    d["restarting"] = true;
+    sendJson(r, d, 202);
+  });
+  reset->setMethod(HTTP_POST);
+  reset->setMaxContentLength(64);
+  server_->addHandler(reset);
+
   server_->on("/api/v1/i2c", HTTP_GET, [dv](AsyncWebServerRequest* r) {
     JsonDocument d;
     dv->describeScan(d.to<JsonObject>());

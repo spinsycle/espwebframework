@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <math.h>
+#include <new>
 
 #include "DeviceStore.h"
 #include "Drivers.h"
@@ -82,6 +83,46 @@ DevErr DeviceRegistry::requestAdd(const DeviceConfig& c) {
   op.kind = Op::Add;
   op.cfg = c;
   return push(op) ? DevErr::Ok : DevErr::Full;
+}
+
+bool DeviceRegistry::config(const char* id, DeviceConfig& out) const {
+  hal::CriticalSection cs;
+  int i = find(id);
+  if (i < 0) return false;
+  out = cfg_[i];
+  return true;
+}
+
+DevErr DeviceRegistry::requestUpdate(const DeviceConfig& c) {
+  {
+    hal::CriticalSection cs;
+    int i = find(c.id);
+    if (i < 0) return DevErr::NotFound;
+    if (c.type != cfg_[i].type) return DevErr::Type;  // a different kind of device is a remove + add
+    DevErr e = validateDevice(c, kChip, cfg_, n_, i);
+    if (e != DevErr::Ok) return e;
+  }
+  Op op;
+  op.kind = Op::Update;
+  op.cfg = c;
+  return push(op) ? DevErr::Ok : DevErr::Full;
+}
+
+ImportResult DeviceRegistry::requestImport(const DeviceConfig* list, size_t n) {
+  ImportResult r;
+  if (n > kMaxDevices) { r.err = DevErr::Full; r.index = kMaxDevices; return r; }
+  for (size_t i = 0; i < n; i++) {  // each device is checked against the ones before it, as if added one by one
+    DevErr e = validateDevice(list[i], kChip, list, i);
+    if (e != DevErr::Ok) { r.err = e; r.index = i; return r; }
+  }
+  DeviceConfig* copy = new (std::nothrow) DeviceConfig[n ? n : 1];
+  if (!copy) { r.err = DevErr::Full; return r; }
+  for (size_t i = 0; i < n; i++) copy[i] = list[i];
+  hal::CriticalSection cs;
+  if (importList_) { delete[] copy; r.err = DevErr::Full; return r; }  // one import at a time
+  importList_ = copy;
+  importN_ = n;
+  return r;
 }
 
 DevErr DeviceRegistry::requestRemove(const char* id) {
@@ -336,6 +377,47 @@ void DeviceRegistry::doRemove(const char* id) {
   Serial.printf("[dev] removed '%s' (saved=%d)\n", id, saved);
 }
 
+void DeviceRegistry::doUpdate(const DeviceConfig& c) {
+  int idx = find(c.id);
+  if (idx < 0) return;
+  size_t i = size_t(idx);
+  DevErr e = validateDevice(c, kChip, cfg_, n_, int(i));  // re-check: the list may have changed while queued
+  if (e != DevErr::Ok) {
+    Serial.printf("[dev] edit '%s' dropped: %s\n", c.id, devErrCode(e));
+    return;
+  }
+  stopHw(i);  // the old pins and PWM slot are released before the new settings claim theirs
+  {
+    hal::CriticalSection cs;
+    cfg_[i] = c;
+  }
+  startHw(i);  // runtime state restarts: a relay returns to its boot value
+  {
+    hal::CriticalSection cs;
+    structVer_ = structVer_ + 1;
+  }
+  bool saved = DeviceStore::save(cfg_, n_);
+  Serial.printf("[dev] edited '%s' (saved=%d)\n", c.id, saved);
+}
+
+void DeviceRegistry::doImport() {
+  DeviceConfig* list;
+  size_t n;
+  {
+    hal::CriticalSection cs;
+    list = importList_;
+    n = importN_;
+  }
+  bool ok = DeviceStore::saveNew(list, n) && DeviceStore::commitNew();
+  Serial.printf("[dev] import of %u device(s): %s\n", unsigned(n), ok ? "saved, restarting" : "FAILED, nothing changed");
+  {
+    hal::CriticalSection cs;
+    importList_ = nullptr;
+  }
+  delete[] list;
+  if (ok) restart_ = true;
+}
+
 void DeviceRegistry::doCommand(const char* id, const Command& cmd) {
   int idx = find(id);
   if (idx < 0) return;
@@ -505,12 +587,15 @@ void DeviceRegistry::doScan() {
 }
 
 void DeviceRegistry::loop() {
+  if (restart_) return;  // an import has been committed: nothing may save over it before the restart
   Op op;
   while (pop(op)) {
     if (op.kind == Op::Add) doAdd(op.cfg);
     else if (op.kind == Op::Remove) doRemove(op.id);
+    else if (op.kind == Op::Update) doUpdate(op.cfg);
     else doCommand(op.id, op.cmd);
   }
+  if (importList_) doImport();
   if (scanReq_) doScan();
   pollInputs();
   pollSensors();

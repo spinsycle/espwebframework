@@ -16,7 +16,7 @@ DEVICES = [
     ("boot sensitive 15", "gpio == 0 || gpio == 2 || gpio == 15;\n  return gpio == 0 || gpio == 2 || gpio == 5", "gpio == 0 || gpio == 2;\n  return gpio == 0 || gpio == 2 || gpio == 5"),
     ("id charset digits", "(c >= '0' && c <= '9') || c == '_'", "(c >= '1' && c <= '9') || c == '_'"),
     ("id max length", "n > kIdCap - 1", "n > kIdCap"),
-    ("full check", "if (n >= kMaxDevices) return DevErr::Full;", "if (n > kMaxDevices) return DevErr::Full;"),
+    ("full check", "if (n - (skip >= 0 ? 1 : 0) >= kMaxDevices) return DevErr::Full;", "if (n - (skip >= 0 ? 1 : 0) > kMaxDevices) return DevErr::Full;"),
     ("duplicate id", "if (!strcmp(others[i].id, c.id)) return DevErr::Duplicate;", ""),
     ("pwm limit", "pwmCount >= kMaxPwm", "pwmCount > kMaxPwm"),
     ("pin in use", "if (mine[a] == theirs[b]) return DevErr::PinInUse;", ""),
@@ -145,10 +145,32 @@ LIMITER = [
     ("count", "count++;\n    return true;", "return true;"),
 ]
 
+# P5: editing a device in place (validateDevice's skip) and the config rules.
+EDIT = [
+    ("skip dup loop", "    if (int(i) == skip) continue;\n    if (!strcmp(others[i].id", "    if (!strcmp(others[i].id"),
+    ("skip freq loop", "if (int(i) != skip && usesPwmSlot(others[i])", "if (usesPwmSlot(others[i])"),
+    ("skip pin loop", "      if (int(i) == skip) continue;\n      if (isI2cDevice(c) && isI2cDevice(others[i])) {", "      if (isI2cDevice(c) && isI2cDevice(others[i])) {"),
+    ("skip full discount", "n - (skip >= 0 ? 1 : 0) >= kMaxDevices", "n >= kMaxDevices"),
+    ("skip wrong index", "    if (int(i) == skip) continue;\n    if (!strcmp(others[i].id", "    if (int(i) == skip + 1) continue;\n    if (!strcmp(others[i].id"),
+    ("skip ignores all", "    if (int(i) == skip) continue;\n    if (!strcmp(others[i].id", "    if (skip >= 0) continue;\n    if (!strcmp(others[i].id"),
+]
+
+CONFIG = [
+    ("schema none ok", "if (version < 0) return SchemaCheck::Ok;", "if (version < 0) return SchemaCheck::Bad;"),
+    ("schema zero bad", "if (version < 1) return SchemaCheck::Bad;", "if (version < 0) return SchemaCheck::Bad;"),
+    ("schema too new", "if (version > kConfigSchema) return SchemaCheck::TooNew;", "if (version > kConfigSchema + 1) return SchemaCheck::TooNew;"),
+    ("file list network", '"/config/network.json",     "/config/network.json.tmp",', '"/config/network.json.tmp",'),
+    ("file list bak", '"/config/devices.json.bak", "/config/devices.json.new",', '"/config/devices.json.new",'),
+    ("file list new", '"/config/devices.json.bak", "/config/devices.json.new",', '"/config/devices.json.bak",'),
+    ("is config file", "if (!strcmp(f, path)) return true;", "if (!strncmp(f, path, 8)) return true;"),
+]
+
 SETS = [
     ("devices", "src/devices/DeviceTypes.h", "test_devices", DEVICES),
     ("p4", "src/devices/DeviceTypes.h", "test_p4", P4),
     ("sensor math", "src/devices/SensorMath.h", "test_p4", SENSOR),
+    ("edit", "src/devices/DeviceTypes.h", "test_p5", EDIT),
+    ("config rules", "src/config/ConfigRules.h", "test_p5", CONFIG),
     ("queue", "src/devices/OpQueue.h", "test_ws", QUEUE),
     ("limiter", "src/net/RateLimiter.h", "test_ws", LIMITER),
 ]

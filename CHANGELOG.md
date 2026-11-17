@@ -1,5 +1,14 @@
 # Changelog
 
+## P5
+- Config system: every saved file carries `schema_version` (files from before P5 count as version 1; a file from a newer framework is refused, never guessed at). `devices.json` keeps the previous good copy as `devices.json.bak` and loading falls back to it.
+- Export `GET /api/v1/config/export` (device list, no live state, no Wi-Fi passwords; the network settings are not part of it). Import `POST /api/v1/config/import` replaces every device: the whole file is validated first (each device against the ones before it), a failure names the device (`index`, `id`, `reason`, `field`) and changes nothing; a good import is written to disk and the board restarts.
+- Factory reset `POST /api/v1/config/factory-reset` with `{"confirm":"factory-reset"}` deletes every saved config file and restarts; the UI files are kept.
+- Edit a device in place `PUT /api/v1/devices` (body merged onto the device named by `id`; the type cannot change). Validation ignores the device's old self, so keeping your own pin or changing the only PWM device's frequency is allowed. The device restarts with its new settings (a relay returns to its boot value).
+- UI: edit button on each device card, Configuration card on the System tab (export, import, factory reset with confirmations).
+- Known limits: import body at most 6 KB, 32 devices; network settings stay on the Network tab; no auth until P8, so anyone on the LAN can export, import or reset.
+- Native tests 72, mutation check extended (device-edit and config rules sets); live API test extended.
+
 ## P4
 - New device types: DC motor (H-bridge, one or two direction pins, signed speed, stop), servo (direct pin or PCA9685 channel, calibrated pulse range), sensor (DS18B20 on 1-Wire, BME280 / BMP280 on I2C), serial device (send a line, last received line).
 - Input gains an optional long-press time (`long_ms`) and a long-press counter.

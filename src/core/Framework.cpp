@@ -2,6 +2,9 @@
 
 #include "core/Version.h"
 #include "hal/Hal.h"
+#include <LittleFS.h>
+
+#include "config/ConfigRules.h"
 #include "net/NetworkStore.h"
 
 using namespace espwf;
@@ -33,8 +36,18 @@ bool FrameworkController::begin() {
   return true;
 }
 
+void FrameworkController::requestFactoryReset() { resetPending_ = true; }
+
 void FrameworkController::loop() {
+  if (resetPending_) {
+    resetPending_ = false;
+    devices_.halt();  // nothing may write a config file after this point
+    for (const char* f : espwf::kConfigFiles) LittleFS.remove(f);
+    Serial.println("[espwf] factory reset: saved config deleted, restarting");
+    restart();
+  }
   devices_.loop();
+  if (devices_.restartRequested() && !restartPending_) restart();
   ws_.loop();
   net_.loop();
   if (restartPending_ && int32_t(millis() - restartAt_) >= 0) hal::restart();

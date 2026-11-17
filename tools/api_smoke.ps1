@@ -186,5 +186,43 @@ Settle
 $h = (Call GET '/status').json.heap
 Write-Host ("  heap free {0}, largest block {1}, fragmentation {2}%" -f $h.free, $h.max_block, $h.fragmentation_pct)
 
+
+Write-Host '== P5 config (edit, export, rejected imports; a good import and a factory reset restart the board, so the checklist does those)'
+Check 'edit unknown 404' ((Call PUT '/devices' @{ id = 'smoke_nope'; name = 'x' }).code -eq 404)
+Call POST '/devices' @{ id = 'smoke_ed'; type = 'relay'; pin = $relayPin; name = 'before' } | Out-Null
+Settle
+Check 'edit renames in place' ((Call PUT '/devices' @{ id = 'smoke_ed'; name = 'after' }).code -eq 202)
+Settle
+Check 'edit applied' ((Dev 'smoke_ed').name -eq 'after')
+Check 'edit kept the pin' ((Dev 'smoke_ed').pin -eq $relayPin)
+Check 'edit cannot change type' ((Call PUT '/devices' @{ id = 'smoke_ed'; type = 'pwm' }).json.error -eq 'bad_type')
+Check 'edit validates like add (reserved pin)' ((Call PUT '/devices' @{ id = 'smoke_ed'; pin = $reservedPin }).json.error -eq 'pin_reserved')
+Check 'edit to own pin is not a conflict' ((Call PUT '/devices' @{ id = 'smoke_ed'; pin = $relayPin }).code -eq 202)
+Settle
+
+$ex = Call GET '/config/export'
+Check 'export ok' ($ex.code -eq 200 -and $ex.json.schema_version -eq 1)
+Check 'export lists the device' (($ex.json.devices | Where-Object { $_.id -eq 'smoke_ed' }).name -eq 'after')
+Check 'export has no live state' (-not ($ex.json.devices | Where-Object { $_.state }))
+Check 'export has no passwords' (-not (($ex.json | ConvertTo-Json -Depth 6) -match 'password'))
+
+$before = (Call GET '/devices').json.devices.Count
+$r = Call POST '/config/import' @{ schema_version = 99; devices = @() }
+Check 'import from a newer schema refused' ($r.code -eq 400 -and $r.json.error -eq 'unsupported_schema')
+$r = Call POST '/config/import' @{ schema_version = 1; devices = 'nope' }
+Check 'import: devices must be a list' ($r.code -eq 400 -and $r.json.error -eq 'bad_format')
+$r = Call POST '/config/import' @{ schema_version = 1; devices = @(
+  @{ id = 'imp_a'; type = 'relay'; pin = $relayPin },
+  @{ id = 'imp_a'; type = 'relay'; pin = $pwmPin }) }
+Check 'import: duplicate id rejected at index 1' ($r.code -eq 400 -and $r.json.error -eq 'import_rejected' -and $r.json.index -eq 1 -and $r.json.reason -eq 'duplicate_id')
+$r = Call POST '/config/import' @{ schema_version = 1; devices = @(@{ id = 'imp_a'; type = 'relay'; pin = $reservedPin }) }
+Check 'import: bad pin rejected' ($r.code -eq 400 -and $r.json.reason -eq 'pin_reserved')
+Settle
+Check 'rejected imports changed nothing' (((Call GET '/devices').json.devices.Count -eq $before) -and (Dev 'smoke_ed'))
+Check 'factory reset needs the confirm word' ((Call POST '/config/factory-reset' @{ confirm = 'yes' }).json.error -eq 'confirm_required')
+Check 'still there after refused reset' ([bool](Dev 'smoke_ed'))
+Call DELETE '/devices?id=smoke_ed' | Out-Null
+Settle
+
 Write-Host ("`n{0} passed, {1} failed" -f $script:pass, $script:fail)
 exit ([int]($script:fail -gt 0))

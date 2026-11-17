@@ -3,11 +3,15 @@
 #include <Arduino.h>
 #include <LittleFS.h>
 
+#include "config/ConfigRules.h"
+
 namespace espwf {
 namespace DeviceStore {
 
 static const char* kFile = "/config/devices.json";
 static const char* kTmp = "/config/devices.json.tmp";
+static const char* kBak = "/config/devices.json.bak";
+static const char* kNew = "/config/devices.json.new";
 
 // Reads an optional integer field in [lo, hi]. Returns false (and sets bad) on a wrong type or range.
 static bool getInt(JsonVariantConst v, long lo, long hi, long& out, bool& bad) {
@@ -134,16 +138,22 @@ void toJson(const DeviceConfig& c, JsonObject out) {
   }
 }
 
-size_t load(DeviceConfig* out, size_t cap, Chip chip) {
-  File f = LittleFS.open(kFile, "r");
-  if (!f) f = LittleFS.open(kTmp, "r");  // only survives a power cut between remove() and rename()
-  if (!f) return 0;
+bool schemaOk(JsonVariantConst doc) {
+  JsonVariantConst v = doc["schema_version"];
+  if (v.isNull()) return configSchemaCheck(-1) == SchemaCheck::Ok;
+  if (!v.is<long>() || v.is<bool>()) return false;
+  return configSchemaCheck(v.as<long>()) == SchemaCheck::Ok;
+}
+
+// Reads one file; false if it is missing, unparsable or from a newer framework.
+static bool readList(const char* path, DeviceConfig* out, size_t cap, Chip chip, size_t& n) {
+  File f = LittleFS.open(path, "r");
+  if (!f) return false;
   JsonDocument doc;
   DeserializationError e = deserializeJson(doc, f);
   f.close();
-  if (e) { Serial.println("[dev] devices.json unreadable, starting empty"); return 0; }
-
-  size_t n = 0;
+  if (e || !schemaOk(doc)) { Serial.printf("[dev] %s unreadable or too new\n", path); return false; }
+  n = 0;
   for (JsonVariantConst item : doc["devices"].as<JsonArrayConst>()) {
     if (n >= cap) break;
     DeviceConfig c;
@@ -155,14 +165,21 @@ size_t load(DeviceConfig* out, size_t cap, Chip chip) {
     }
     out[n++] = c;
   }
-  return n;
+  return true;
 }
 
-bool save(const DeviceConfig* devs, size_t n) {
+size_t load(DeviceConfig* out, size_t cap, Chip chip) {
+  size_t n = 0;
+  // tmp only survives a power cut between the two renames in save(); bak is the previous good file.
+  if (readList(kFile, out, cap, chip, n) || readList(kTmp, out, cap, chip, n) || readList(kBak, out, cap, chip, n)) return n;
+  return 0;
+}
+
+static bool writeList(const char* path, const DeviceConfig* devs, size_t n) {
   if (!LittleFS.exists("/config")) LittleFS.mkdir("/config");
-  File f = LittleFS.open(kTmp, "w");
+  File f = LittleFS.open(path, "w");
   if (!f) return false;
-  f.print("{\"schema_version\":1,\"devices\":[");
+  f.printf("{\"schema_version\":%d,\"devices\":[", kConfigSchema);
   for (size_t i = 0; i < n; i++) {  // one device at a time: no big JSON document on the heap
     JsonDocument d;
     toJson(devs[i], d.to<JsonObject>());
@@ -171,9 +188,19 @@ bool save(const DeviceConfig* devs, size_t n) {
   }
   f.print("]}");
   f.close();
-  LittleFS.remove(kFile);
-  return LittleFS.rename(kTmp, kFile);
+  return true;
 }
+
+// tmp -> file, keeping the file it replaces as .bak.
+static bool commit(const char* from) {
+  LittleFS.remove(kBak);
+  if (LittleFS.exists(kFile)) LittleFS.rename(kFile, kBak);
+  return LittleFS.rename(from, kFile);
+}
+
+bool save(const DeviceConfig* devs, size_t n) { return writeList(kTmp, devs, n) && commit(kTmp); }
+bool saveNew(const DeviceConfig* devs, size_t n) { return writeList(kNew, devs, n); }
+bool commitNew() { return commit(kNew); }
 
 }  // namespace DeviceStore
 }  // namespace espwf

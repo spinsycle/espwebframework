@@ -22,7 +22,7 @@ class FrameworkController {
   void getSystemInfo(JsonObject out) const;  // static facts (/api/v1/system)
   void getStatus(JsonObject out) const;      // live numbers (/api/v1/status)
   void restart();                            // deferred ~400 ms so HTTP replies can flush
-  // factoryReset() arrives with the config system (P5).
+  void requestFactoryReset();                // deletes every saved config file, then restarts (queued; runs in loop())
 
   espwf::NetworkManager& network() { return net_; }
   espwf::DeviceRegistry& devices() { return devices_; }
@@ -35,4 +35,5 @@ class FrameworkController {
   espwf::WsHub ws_;
   uint32_t restartAt_ = 0;
   bool restartPending_ = false;
+  volatile bool resetPending_ = false;
 };

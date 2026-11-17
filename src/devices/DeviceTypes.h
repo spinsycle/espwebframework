@@ -238,17 +238,19 @@ inline bool baudOk(Chip chip, uint32_t b) {
   return false;
 }
 
-// `others` = the devices already registered (never includes `c` itself).
-inline DevErr validateDevice(const DeviceConfig& c, Chip chip, const DeviceConfig* others, size_t n) {
+// `others` = the devices already registered. When editing a device in place, `skip` is its index in `others`
+// and it is ignored, so a device never conflicts with its old self.
+inline DevErr validateDevice(const DeviceConfig& c, Chip chip, const DeviceConfig* others, size_t n, int skip = -1) {
   using namespace detail;
   if (!devTerminated(c.id, kIdCap) || !validDeviceId(c.id)) return DevErr::Id;
   if (!devTerminated(c.name, kNameCap)) return DevErr::Name;
   if (uint8_t(c.type) > uint8_t(DeviceType::Serial)) return DevErr::Type;
   if (c.model >= kModelCount) return DevErr::Model;
-  if (n >= kMaxDevices) return DevErr::Full;
+  if (n - (skip >= 0 ? 1 : 0) >= kMaxDevices) return DevErr::Full;
 
   size_t pwmCount = 0, serialCount = 0;
   for (size_t i = 0; i < n; i++) {
+    if (int(i) == skip) continue;
     if (!strcmp(others[i].id, c.id)) return DevErr::Duplicate;
     if (usesPwmSlot(others[i])) pwmCount++;
     if (others[i].type == DeviceType::Serial) serialCount++;
@@ -257,7 +259,7 @@ inline DevErr validateDevice(const DeviceConfig& c, Chip chip, const DeviceConfi
   if (c.type == DeviceType::Serial && serialCount >= 1) return DevErr::SerialLimit;
   if (chip == Chip::Esp8266 && usesPwmSlot(c))  // one PWM frequency for the whole chip
     for (size_t i = 0; i < n; i++)
-      if (usesPwmSlot(others[i]) && pwmFreq(others[i]) != pwmFreq(c)) return DevErr::FreqConflict;
+      if (int(i) != skip && usesPwmSlot(others[i]) && pwmFreq(others[i]) != pwmFreq(c)) return DevErr::FreqConflict;
 
   // Each GPIO the device uses, with the role it needs there. The I2C bus pins are checked for conflicts only.
   struct PinUse { int8_t pin; PinRole role; };
@@ -295,6 +297,7 @@ inline DevErr validateDevice(const DeviceConfig& c, Chip chip, const DeviceConfi
     int8_t mine[5];
     size_t nm = pinsOf(c, chip, mine);
     for (size_t i = 0; i < n; i++) {
+      if (int(i) == skip) continue;
       if (isI2cDevice(c) && isI2cDevice(others[i])) {  // two I2C devices share the bus, but not an address
         bool sameChannelBoard = c.type == DeviceType::Servo && others[i].type == DeviceType::Servo;
         if (c.i2cAddr == others[i].i2cAddr && !(sameChannelBoard && c.channel != others[i].channel))
