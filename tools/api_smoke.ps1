@@ -514,6 +514,7 @@ Check 'the rule that watches it ran once' ((RuleStatus 'smoke_sw').fired -eq 1)
 # ---- pause, resume, stop
 $null = Call PUT '/automation/sequences' (Seq 'smoke_q' @((SWait 30), (SEvent 'late')))
 Start-Sleep -Milliseconds 1200
+$d0 = (SeqStatus 'smoke_q').done   # replacing a sequence keeps its history, so a rule watching it is not disturbed
 $null = Call POST '/automation/sequences/start?id=smoke_q'
 Start-Sleep -Milliseconds 800
 Check 'a long sequence is running' ((SeqStatus 'smoke_q').state -eq 'running')
@@ -526,7 +527,7 @@ Check 'and resumed' ((SeqStatus 'smoke_q').state -eq 'running')
 $null = Call POST '/automation/sequences/stop?id=smoke_q'
 Start-Sleep -Milliseconds 800
 $q = SeqStatus 'smoke_q'
-Check 'and stopped' ($q.state -eq 'idle' -and $q.stopped -ge 1 -and $q.done -eq 0)
+Check 'and stopped, without counting as finished' ($q.state -eq 'idle' -and $q.stopped -ge 1 -and $q.done -eq $d0)
 Check 'the event log shows sequence_stopped' ([bool](Events | Where-Object { $_.rule -eq 'smoke_q' -and $_.kind -eq 'sequence_stopped' }))
 
 # ---- a rule that starts a timer, a timer rule, and the dashboard component
