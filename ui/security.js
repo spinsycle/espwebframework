@@ -5,20 +5,25 @@
 let authed = false;
 const byId = (id) => document.getElementById(id);
 
+let gateMode = "";  // which form is up; background requests keep calling showGate() and must not steal the cursor
+
 function showGate(mode, forced) {  // mode: "login" | "change"
   authed = false;
+  const fresh = byId("gate").hidden || gateMode !== mode;  // only move the focus when the form first appears
+  gateMode = mode;
   byId("gate").hidden = false;
   byId("loginform").hidden = mode !== "login";
   byId("pwform").hidden = mode !== "change";
   byId("pwcancel").hidden = !!forced;
-  byId("pwform").elements.current.closest("label").hidden = false;
-  (mode === "login" ? byId("loginform").elements.password : byId("pwform").elements.current.value ? byId("pwform").elements.password : byId("pwform").elements.current).focus();
+  if (!fresh) return;
+  const f = byId("pwform").elements;
+  (mode === "login" ? byId("loginform").elements.password : f.current.value ? f.password : f.current).focus();
 }
 
 // app.js calls this when the board answers 401 (the session ended, or never existed).
 function authFail() { if (byId("gate").hidden || authed) showGate("login"); }
 
-function hideGate() { byId("gate").hidden = true; }
+function hideGate() { byId("gate").hidden = true; gateMode = ""; }
 
 async function authBoot(start) {
   try {
