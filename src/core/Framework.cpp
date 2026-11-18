@@ -1,5 +1,7 @@
 #include "Framework.h"
 
+#include "core/EventLog.h"
+#include "core/HealthRules.h"
 #include "core/Version.h"
 #include "hal/Hal.h"
 #include <LittleFS.h>
@@ -22,6 +24,11 @@ bool FrameworkController::begin() {
   if (!hal::fsBegin()) Serial.println("[espwf] LittleFS mount failed");
 
   devices_.begin();  // before Wi-Fi: relays reach their boot state as early as possible
+  {
+    char why[40];
+    hal::resetReason(why, sizeof why);
+    logEvent(isFaultReason(why) ? "boot_fault" : "boot", why);
+  }
 
   NetworkConfig cfg;
   setNetworkDefaults(cfg, hal::chipId());
@@ -41,6 +48,22 @@ bool FrameworkController::begin() {
 void FrameworkController::requestFactoryReset() { resetPending_ = true; }
 
 void FrameworkController::loop() {
+  uint32_t t = millis();
+  if (lastLoop_ && uint32_t(t - lastLoop_) > loopMaxMs_) loopMaxMs_ = uint32_t(t - lastLoop_);  // the first pass would count setup()
+  lastLoop_ = t;
+  if (int32_t(t - nextHeapSample_) >= 0) {
+    nextHeapSample_ = t + 500;
+    uint32_t h = hal::freeHeap();
+    if (h < minHeap_) minHeap_ = h;
+  }
+#if defined(ESP8266)
+  if (wdtTest_) {  // never returns: the software watchdog resets the board after about 3 seconds
+    logEvent("watchdog_test", "hanging the loop on purpose");
+    Serial.println("[espwf] watchdog test: hanging the loop");
+    Serial.flush();
+    while (true) { }
+  }
+#endif
   if (resetPending_) {
     resetPending_ = false;
     devices_.halt();  // nothing may write a config file after this point
@@ -50,6 +73,7 @@ void FrameworkController::loop() {
       for (const char* f : espwf::kConfigFiles) LittleFS.remove(f);
     }
     Serial.println("[espwf] factory reset: saved config deleted, restarting");
+    logEvent("factory_reset", "saved config deleted");
     restart();
   }
   devices_.loop();
@@ -61,6 +85,7 @@ void FrameworkController::loop() {
 }
 
 void FrameworkController::restart() {
+  logEvent("restart", "requested");
   restartAt_ = millis() + 400;
   restartPending_ = true;
 }
@@ -79,6 +104,16 @@ void FrameworkController::getSystemInfo(JsonObject out) const {
   out["flash_size"] = hal::flashSize();
   out["sdk"] = ESP.getSdkVersion();
   out["build"] = __DATE__ " " __TIME__;
+}
+
+void FrameworkController::getHealth(JsonObject out) const {
+  char reason[40];
+  hal::resetReason(reason, sizeof reason);
+  out["watchdog_reset"] = isWatchdogReason(reason);
+  out["fault_reset"] = isFaultReason(reason);
+  out["loop_max_ms"] = loopMaxMs_;
+  out["heap"]["min_free"] = minHeap_ == 0xFFFFFFFFu ? hal::freeHeap() : minHeap_;
+  out["events_total"] = eventTotal();
 }
 
 void FrameworkController::getStatus(JsonObject out) const {

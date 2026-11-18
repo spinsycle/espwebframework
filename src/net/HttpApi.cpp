@@ -17,6 +17,8 @@
 #include "devices/DeviceRegistry.h"
 #include "devices/DeviceStore.h"
 #include "net/NetworkStore.h"
+#include "core/EventLog.h"
+#include "devices/PinInfo.h"
 #include "net/Chunker.h"
 #include "net/Ota.h"
 #include "net/Token.h"
@@ -99,6 +101,108 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry
     d["ok"] = true;
     sendJson(r, d);
   });
+
+  // ---- P8b: the controller's heartbeat, a read-only look at the board, and the system event log.
+  // Any logged-in client may say "I am still here": every failsafe timer starts over. Nothing is queued or saved.
+  server_->on("/api/v1/heartbeat", HTTP_POST, [dv](AsyncWebServerRequest* r) {
+    dv->heartbeat();
+    JsonDocument d;
+    d["ok"] = true;
+    sendJson(r, d);
+  });
+
+  server_->on("/api/v1/diagnostics", HTTP_GET, [f, dv](AsyncWebServerRequest* r) {
+    String head;
+    {
+      JsonDocument d;
+      JsonObject o = d.to<JsonObject>();
+      f->getStatus(o);
+      f->getHealth(o);
+      o.remove("network");  // the Network tab already has it, and the reply stays small
+      serializeJson(d, head);
+      head.remove(head.length() - 1);  // without the closing brace: the lists follow
+    }
+    auto c = std::make_shared<Chunker>(head);
+    c->add(",\"devices\":[", [dv](size_t i, String& out) {
+      DeviceView v;
+      if (!dv->view(i, v)) return false;
+      JsonDocument d;
+      JsonObject o = d.to<JsonObject>();
+      o["id"] = v.cfg.id;
+      o["type"] = deviceTypeName(v.cfg.type);
+      o["enabled"] = v.cfg.enabled;
+      if (v.cfg.failsafeS) { o["failsafe_s"] = v.cfg.failsafeS; o["tripped"] = v.tripped; }
+      if (v.cfg.type == DeviceType::Sensor) { o["ok"] = v.ok; o["errors"] = v.errs; }
+      serializeJson(d, out);
+      return true;
+    });
+    c->add(",\"events\":[", [](size_t i, String& out) {
+      SysEvent e;
+      if (!eventNewest(i, e)) return false;
+      JsonDocument d;
+      eventToJson(e, d.to<JsonObject>());
+      serializeJson(d, out);
+      return true;
+    });
+    sendChunked(r, c);
+  });
+
+  // Every pin the chip has: its label, why it needs care, which device uses it, and its level right now.
+  // Reading a pin never changes it. There is no way to write a pin from here.
+  server_->on("/api/v1/gpio", HTTP_GET, [dv](AsyncWebServerRequest* r) {
+#if defined(ESP8266)
+    const Chip chip = Chip::Esp8266;
+    const int last = 16;
+#else
+    const Chip chip = Chip::Esp32;
+    const int last = 39;
+#endif
+    char head[64];
+    snprintf(head, sizeof head, "{\"chip\":\"%s\",\"read_only\":true", hal::chipName());
+    auto c = std::make_shared<Chunker>(head);
+    auto next = std::make_shared<int>(0);  // the next GPIO number to look at: unlisted numbers are skipped
+    c->add(",\"pins\":[", [dv, chip, last, next](size_t, String& out) {
+      while (*next <= last && !pinListed(chip, *next)) (*next)++;
+      if (*next > last) return false;
+      int g = (*next)++;
+      JsonDocument d;
+      JsonObject o = d.to<JsonObject>();
+      o["gpio"] = g;
+      o["label"] = pinLabel(chip, g);
+      o["note"] = pinNote(chip, g);
+      DeviceView v;
+      for (size_t k = 0; dv->view(k, v); k++) {
+        int8_t p[5];
+        size_t np = pinsOf(v.cfg, chip, p);
+        bool mine = false;
+        for (size_t j = 0; j < np; j++) mine = mine || p[j] == g;
+        if (mine) { o["use"] = v.cfg.id; break; }
+      }
+      if (pinReadable(chip, g)) o["level"] = digitalRead(g) ? 1 : 0;
+      serializeJson(d, out);
+      return true;
+    });
+    sendChunked(r, c);
+  });
+
+  // Hangs the main loop on purpose so the chip's watchdog resets the board: proves the reset is reported.
+  auto* wdt = new AsyncCallbackJsonWebHandler("/api/v1/system/test-watchdog", [f](AsyncWebServerRequest* r, JsonVariant& json) {
+#if defined(ESP8266)
+    if (!json["confirm"].is<const char*>() || strcmp(json["confirm"].as<const char*>(), "hang") != 0) { sendError(r, 400, "confirm_required", "confirm"); return; }
+    JsonDocument d;
+    d["ok"] = true;
+    d["note"] = "the board hangs now and the watchdog restarts it in a few seconds";
+    sendJson(r, d);
+    f->requestWatchdogTest();
+#else
+    (void)json;
+    (void)f;
+    sendError(r, 501, "not_supported", "chip");
+#endif
+  });
+  wdt->setMethod(HTTP_POST);
+  wdt->setMaxContentLength(64);
+  server_->addHandler(wdt);
 
   // P1 interim network endpoints; P5 folds them into /api/v1/config.
   server_->on("/api/v1/network", HTTP_GET, [n](AsyncWebServerRequest* r) {
@@ -400,8 +504,10 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry
           d["ok"] = true;
           d["restarting"] = true;
           sendJson(r, d);
+          logEvent("ota", "installed, restarting");
           f->restart();
         } else {
+          logEventf("ota", "failed: %s", gOtaErr[0] ? gOtaErr : "no firmware");
           d["error"] = "update_failed";
           d["detail"] = gOtaErr[0] ? gOtaErr : "no firmware received";
           sendJson(r, d, 400);

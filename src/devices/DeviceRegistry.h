@@ -21,6 +21,8 @@ struct DeviceView {  // a copy of one device, safe to read outside any lock
   bool hasHum = false;   // sensor: the chip reports humidity (BME280, not BMP280)
   float temp = 0, hum = 0, press = 0;
   char text[kTextCap] = {0};  // serial: last line received
+  bool tripped = false;  // failsafe fired and no command has arrived since
+  uint16_t errs = 0;     // sensor: failed readings since boot
 };
 
 enum class ScanErr : uint8_t { Ok, Busy, PinsInUse };
@@ -50,6 +52,8 @@ class DeviceRegistry {
   bool restartRequested() const { return restart_; }
   void halt() { restart_ = true; }  // stop applying changes (and saving) ahead of a restart
   CmdErr requestCommand(const char* id, const Command& cmd);
+  // "The controller is still there": any logged-in client, from any task. Keeps every failsafe timer from running out.
+  void heartbeat() { beat_ = millis(); }
 
   // I2C bus scan: queued here, run in loop(); poll describeScan() for the result.
   ScanErr requestScan();
@@ -74,6 +78,9 @@ class DeviceRegistry {
     Debouncer deb;
     int16_t val = 0;   // motor speed / servo angle
     uint32_t longs = 0;
+    uint32_t alive = 0;      // millis() of the last command (or of the start), for the failsafe
+    bool tripped = false;    // failsafe fired; cleared by the next command
+    uint16_t errs = 0;       // sensor: failed readings since boot
     uint32_t pressedAt = 0;
     bool longDone = true;
     // sensor
@@ -106,6 +113,8 @@ class DeviceRegistry {
   void drivePwm(size_t i);
   void driveMotor(size_t i);
   void driveServo(size_t i);
+  bool applySafe(size_t i);  // put the device in its safe state; true if that changed anything
+  void checkFailsafes();
   void pollInputs();
   void pollSensors();
   void sensorFail(size_t i, uint32_t now);
@@ -117,6 +126,7 @@ class DeviceRegistry {
   DeviceConfig cfg_[kMaxDevices];
   Runtime rt_[kMaxDevices];
   size_t n_ = 0;
+  volatile uint32_t beat_ = 0;  // millis() of the last heartbeat
   uint8_t pwmSlots_ = 0;  // bit i set = slot i in use
 
   // The one serial device (validateDevice allows at most one) keeps its text here, not per device.

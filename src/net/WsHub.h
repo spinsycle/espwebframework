@@ -50,6 +50,9 @@ class WsHub {
     bool on = false;
     uint8_t duty = 0;
     uint32_t edges = 0;
+    int16_t val = 0;
+    bool tripped = false;
+    bool ok = false;
   };
 
   void onData(AsyncWebSocketClient* c, void* arg, uint8_t* data, size_t len);

@@ -1,5 +1,7 @@
 #include "DeviceRegistry.h"
 
+#include "core/EventLog.h"
+
 #include <Arduino.h>
 #include <math.h>
 #include <new>
@@ -42,6 +44,8 @@ bool DeviceRegistry::view(size_t i, DeviceView& out) const {
   out.temp = r.temp;
   out.hum = r.hum;
   out.press = r.press;
+  out.tripped = r.tripped;
+  out.errs = r.errs;
   if (cfg_[i].type == DeviceType::Serial) {
     out.edges = serialLines_;
     memcpy(out.text, serialLast_, kTextCap);
@@ -156,14 +160,17 @@ DevErr DeviceRegistry::requestRemove(const char* id) {
 
 CmdErr DeviceRegistry::requestCommand(const char* id, const Command& cmd) {
   DeviceType t;
+  bool enabled;
   {
     hal::CriticalSection cs;
     int i = find(id);
     if (i < 0) return CmdErr::NotFound;
     t = cfg_[i].type;
+    enabled = cfg_[i].enabled;
   }
   CmdErr e = checkCommand(t, cmd);
   if (e != CmdErr::Ok) return e;
+  if (!enabled) return CmdErr::Disabled;
   Op op;
   op.kind = Op::Cmd;
   strlcpy(op.id, id, sizeof op.id);
@@ -229,6 +236,7 @@ void DeviceRegistry::describeState(const DeviceView& v, JsonObject st) {
       st["last"] = v.text;
       break;
   }
+  if (v.cfg.failsafeS) st["failsafe_tripped"] = v.tripped;
 }
 
 void DeviceRegistry::describe(const DeviceView& v, JsonObject out) {
@@ -251,6 +259,7 @@ void DeviceRegistry::describe(const DeviceView& v, JsonObject out) {
 // ---- loop side (only writer) ----------------------------------------------------------------
 
 void DeviceRegistry::begin() {
+  beat_ = millis();
   n_ = DeviceStore::load(cfg_, kMaxDevices, kChip);
   for (size_t i = 0; i < n_; i++) startHw(i);
   Serial.printf("[dev] %u device(s) loaded\n", unsigned(n_));
@@ -267,6 +276,7 @@ void DeviceRegistry::startHw(size_t i) {
   const DeviceConfig& c = cfg_[i];
   Runtime& r = rt_[i];
   r = Runtime();
+  r.alive = millis();
   switch (c.type) {
     case DeviceType::Relay:
       r.on = c.initial != 0;
@@ -311,11 +321,57 @@ void DeviceRegistry::startHw(size_t i) {
       break;
     case DeviceType::Serial:
       hal::uartBegin(c.pin, c.pin2, c.baud);
-      serialOn_ = true;
+      serialOn_ = c.enabled;
       rxLen_ = 0;
       serialLast_[0] = 0;
       serialLines_ = 0;
       break;
+  }
+  if (!c.enabled) applySafe(i);  // a disabled device never comes up in its boot state: a relay set to 'on at boot' stays off
+}
+
+bool DeviceRegistry::applySafe(size_t i) {
+  SafeTarget t = safeTarget(cfg_[i]);
+  if (!t.act) return false;
+  Runtime& r = rt_[i];
+  bool changed;
+  switch (cfg_[i].type) {
+    case DeviceType::Relay: changed = r.on != t.on; break;
+    case DeviceType::Pwm: changed = r.duty != t.duty; break;
+    case DeviceType::Motor: case DeviceType::Servo: changed = r.val != t.val; break;
+    default: return false;
+  }
+  if (!changed) return false;
+  {
+    hal::CriticalSection cs;
+    r.on = t.on;
+    r.duty = t.duty;
+    r.val = t.val;
+    stateVer_ = stateVer_ + 1;
+  }
+  switch (cfg_[i].type) {
+    case DeviceType::Relay: driveRelay(i); break;
+    case DeviceType::Pwm: drivePwm(i); break;
+    case DeviceType::Motor: driveMotor(i); break;
+    default: driveServo(i); break;
+  }
+  return true;
+}
+
+void DeviceRegistry::checkFailsafes() {
+  uint32_t now = millis(), beat = beat_;
+  for (size_t i = 0; i < n_; i++) {
+    const DeviceConfig& c = cfg_[i];
+    Runtime& r = rt_[i];
+    if (!c.enabled || r.tripped || !failsafeDue(now, newerStamp(r.alive, beat), c.failsafeS)) continue;
+    {
+      hal::CriticalSection cs;
+      r.tripped = true;
+      stateVer_ = stateVer_ + 1;
+    }
+    bool changed = applySafe(i);
+    logEventf("failsafe", "%s: %s", c.id, changed ? "safe state" : "already safe");  // id (16) + this fits the 31-character line
+    Serial.printf("[dev] failsafe '%s' (changed=%d)\n", c.id, changed);
   }
 }
 
@@ -415,6 +471,7 @@ void DeviceRegistry::doUpdate(const DeviceConfig& c) {
     Serial.printf("[dev] edit '%s' dropped: %s\n", c.id, devErrCode(e));
     return;
   }
+  bool wasEnabled = cfg_[i].enabled;
   stopHw(i);  // the old pins and PWM slot are released before the new settings claim theirs
   {
     hal::CriticalSection cs;
@@ -427,6 +484,7 @@ void DeviceRegistry::doUpdate(const DeviceConfig& c) {
   }
   bool saved = DeviceStore::save(cfg_, n_);
   Serial.printf("[dev] edited '%s' (saved=%d)\n", c.id, saved);
+  if (wasEnabled != c.enabled) logEventf("device", "%s %s", c.id, c.enabled ? "enabled" : "disabled");
 }
 
 void DeviceRegistry::doImport() {
@@ -452,6 +510,12 @@ void DeviceRegistry::doCommand(const char* id, const Command& cmd) {
   if (idx < 0) return;
   size_t i = size_t(idx);
   if (checkCommand(cfg_[i].type, cmd) != CmdErr::Ok) return;  // the device may have been replaced since queueing
+  if (!cfg_[i].enabled) return;                               // ... or disabled
+  {
+    hal::CriticalSection cs;
+    rt_[i].alive = millis();  // a command is a sign of life: it re-arms the failsafe, and the one that tripped is over
+    if (rt_[i].tripped) { rt_[i].tripped = false; stateVer_ = stateVer_ + 1; }
+  }
   switch (cfg_[i].type) {
     case DeviceType::Relay: {
       bool on = cmd.action == CmdAction::Toggle ? !rt_[i].on : cmd.value != 0;
@@ -498,7 +562,7 @@ void DeviceRegistry::doCommand(const char* id, const Command& cmd) {
 void DeviceRegistry::pollInputs() {
   uint32_t now = millis();
   for (size_t i = 0; i < n_; i++) {
-    if (cfg_[i].type != DeviceType::Input) continue;
+    if (cfg_[i].type != DeviceType::Input || !cfg_[i].enabled) continue;
     Runtime& r = rt_[i];
     bool active = inputActive(digitalRead(cfg_[i].pin) != LOW, cfg_[i].invert);
     if (r.deb.update(active, now, cfg_[i].debounceMs)) {
@@ -526,6 +590,7 @@ void DeviceRegistry::sensorFail(size_t i, uint32_t now) {
   r.ready = false;  // an I2C chip that lost power needs its calibration read again
   r.next = now + uint32_t(cfg_[i].intervalS) * 1000u;
   if (r.fails < 255) r.fails++;
+  if (r.errs < 65535) r.errs++;
   if (r.fails >= 3 && r.ok) {  // three misses in a row: stop showing the old number
     hal::CriticalSection cs;
     r.ok = false;
@@ -550,7 +615,7 @@ void DeviceRegistry::sensorSet(size_t i, float t, float h, float p, uint32_t now
 void DeviceRegistry::pollSensors() {
   uint32_t now = millis();
   for (size_t i = 0; i < n_; i++) {
-    if (cfg_[i].type != DeviceType::Sensor) continue;
+    if (cfg_[i].type != DeviceType::Sensor || !cfg_[i].enabled) continue;
     const DeviceConfig& c = cfg_[i];
     Runtime& r = rt_[i];
     bool bme = c.model == 1;
@@ -625,6 +690,7 @@ void DeviceRegistry::loop() {
     else doCommand(op.id, op.cmd);
   }
   if (importList_) doImport();
+  checkFailsafes();
   if (scanReq_) doScan();
   pollInputs();
   pollSensors();

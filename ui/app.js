@@ -27,6 +27,7 @@ document.querySelectorAll("#tabs button").forEach((b) =>
     if (b.dataset.tab === "dev") showDevices();
     if (b.dataset.tab === "net") loadNet();
     if (b.dataset.tab === "sys") loadSys();
+    if (b.dataset.tab === "diag") diagShow();
   })
 );
 
@@ -96,7 +97,14 @@ function handleWs(m) {
   }
 }
 
-setInterval(() => {  // heartbeat: a half-open socket (Wi-Fi dropped) stays "open" in the browser until we notice
+// The controller's heartbeat: while a page is open and visible, every failsafe timer is kept from running out.
+// A hidden tab or a dead connection stops it, which is what lets a robot stop when its controller goes away.
+setInterval(() => {
+  if (!authed || document.hidden) return;
+  if (!wsSend({ type: "heartbeat" })) api("/heartbeat", { method: "POST" }).catch(() => {});
+}, 1000);
+
+setInterval(() => {  // keep-alive: a half-open socket (Wi-Fi dropped) stays "open" in the browser until we notice
   if (!wsLive) return;
   wsSend({ type: "ping" });
   if (Date.now() - wsLastRx > 25000 && ws) ws.close();
@@ -191,8 +199,15 @@ function devCard(d, bare) {
   };
   const ed = el("button", { type: "button", className: "rm", textContent: "edit" });
   ed.onclick = () => startEdit(d);
-  const card = el("div", { className: "card dev" }, top, body);
-  if (!bare) card.append(ed, rm);
+  const off = d.enabled === false;
+  if (off) body.querySelectorAll("button,input").forEach((x) => (x.disabled = true));
+  const card = el("div", { className: "card dev" + (off ? " off" : "") }, top, body);
+  if (off) card.append(el("small", { className: "warn", textContent: "Disabled: in its safe state, commands are refused." }));
+  else if (d.state && d.state.failsafe_tripped) card.append(el("small", { className: "warn", textContent: "Failsafe tripped: it is in its safe state. Send a command to resume." }));
+  const en = el("button", { type: "button", className: "rm", textContent: off ? "enable" : "disable" });
+  en.onclick = () => api("/devices", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: d.id, enabled: off }) })
+    .then(() => { if (!wsLive) setTimeout(fetchDevices, 400); }).catch(() => {});
+  if (!bare) card.append(en, ed, rm);
   if (d.boot_sensitive) card.append(el("small", { className: "warn", textContent: "Boot-sensitive pin: a wire here can stop the board booting." }));
   return card;
 }
@@ -267,6 +282,9 @@ function startEdit(d) {
   if (d.min_us !== undefined) { f.min_us.value = d.min_us; f.max_us.value = d.max_us; }
   if (d.channel !== undefined) f.channel.value = d.channel;
   if (d.interval_s !== undefined) f.interval_s.value = d.interval_s;
+  f.enabled.checked = d.enabled !== false;
+  f.failsafe_s.value = d.failsafe_s || 0;
+  f.safe_angle.value = d.safe_angle === undefined ? "" : d.safe_angle;
   if (d.baud !== undefined) f.baud.value = d.baud;
   if (d.i2c_addr !== undefined) { f.saddr.value = "0x" + d.i2c_addr.toString(16); f.xaddr.value = d.i2c_addr; }
   $("devmsg").textContent = "";
@@ -294,6 +312,9 @@ $("devform").addEventListener("submit", async (e) => {
     body.model = f.xmodel.value; body.interval_s = +f.interval_s.value;
     if (onBus) body.i2c_addr = +f.xaddr.value;
   }
+  body.enabled = f.enabled.checked;
+  if (t === "relay" || t === "pwm" || t === "motor" || t === "servo") body.failsafe_s = +f.failsafe_s.value;
+  if (t === "servo") body.safe_angle = f.safe_angle.value === "" ? -1 : +f.safe_angle.value;
   msg.className = "";
   try {
     await api("/devices", { method: editing ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });

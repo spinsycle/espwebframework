@@ -108,12 +108,18 @@ struct DeviceConfig {
   uint16_t intervalS = 5;    // sensor: seconds between readings
   uint16_t longMs = 0;       // input: hold time that counts as a long press, 0 = off
   uint32_t baud = 9600;      // serial
+  bool enabled = true;       // a disabled device sits in its safe state, refuses commands and reads nothing
+  uint16_t failsafeS = 0;    // relay/pwm/motor/servo: seconds without a command or heartbeat before the safe state, 0 = off
+  int16_t safeAngle = -1;    // servo: angle to move to on failsafe or disable, -1 = hold where it is
 };
+
+constexpr uint16_t kMaxFailsafeS = 3600;
 
 enum class DevErr : uint8_t {
   Ok = 0, Id, Name, Type, Pin, PinReserved, PinInputOnly, PinNoPwm, PinNoPullup, PinInUse,
   Debounce, Freq, Initial, Duplicate, Full, PwmLimit, NotFound, Format,
-  Model, I2cAddr, Channel, Pulse, Interval, Baud, LongMs, FreqConflict, SerialLimit, AddrInUse
+  Model, I2cAddr, Channel, Pulse, Interval, Baud, LongMs, FreqConflict, SerialLimit, AddrInUse,
+  Failsafe, SafeAngle
 };
 
 inline const char* devErrCode(DevErr e) {
@@ -145,6 +151,8 @@ inline const char* devErrCode(DevErr e) {
     case DevErr::FreqConflict: return "freq_conflict";
     case DevErr::SerialLimit: return "too_many_serial";
     case DevErr::AddrInUse: return "address_in_use";
+    case DevErr::Failsafe: return "bad_failsafe";
+    case DevErr::SafeAngle: return "bad_safe_angle";
     default: return "bad_format";
   }
 }
@@ -159,6 +167,8 @@ inline const char* devErrField(DevErr e) {
     case DevErr::Channel: return "channel";
     case DevErr::Pulse: return "min_us";
     case DevErr::Interval: return "interval_s";
+    case DevErr::Failsafe: return "failsafe_s";
+    case DevErr::SafeAngle: return "safe_angle";
     case DevErr::Baud: return "baud";
     case DevErr::LongMs: return "long_ms";
     case DevErr::FreqConflict: return "freq_hz";
@@ -197,6 +207,40 @@ inline bool usesPwmSlot(const DeviceConfig& c) {
   return c.type == DeviceType::Pwm || c.type == DeviceType::Motor || (c.type == DeviceType::Servo && c.model == 0);
 }
 inline uint16_t pwmFreq(const DeviceConfig& c) { return c.type == DeviceType::Servo ? 50 : c.freqHz; }
+
+// ---- failsafe -------------------------------------------------------------------------------
+
+// Only devices that drive something have a safe state. Inputs, sensors and the serial port have nothing to switch off.
+inline bool failsafeApplies(DeviceType t) {
+  return t == DeviceType::Relay || t == DeviceType::Pwm || t == DeviceType::Motor || t == DeviceType::Servo;
+}
+
+// No command and no heartbeat for `timeoutS` seconds. 0 = never. `now` and `lastAlive` are millis(), so they may wrap.
+inline bool failsafeDue(uint32_t now, uint32_t lastAlive, uint16_t timeoutS) {
+  return timeoutS != 0 && uint32_t(now - lastAlive) >= uint32_t(timeoutS) * 1000u;
+}
+
+// The later of two millis() stamps, wrap-safe.
+inline uint32_t newerStamp(uint32_t a, uint32_t b) { return int32_t(a - b) >= 0 ? a : b; }
+
+// Where a device goes when it fails safe or is disabled. act=false: leave it exactly as it is (a servo with no safe angle).
+struct SafeTarget {
+  bool act = false;
+  bool on = false;     // relay
+  uint8_t duty = 0;    // pwm percent
+  int16_t val = 0;     // motor speed / servo angle
+};
+inline SafeTarget safeTarget(const DeviceConfig& c) {
+  SafeTarget t;
+  switch (c.type) {
+    case DeviceType::Relay: case DeviceType::Pwm: case DeviceType::Motor: t.act = true; break;  // off, 0 %, stopped
+    case DeviceType::Servo:
+      if (c.safeAngle >= 0) { t.act = true; t.val = c.safeAngle; }
+      break;
+    default: break;
+  }
+  return t;
+}
 
 // The GPIOs a device occupies (the I2C bus pins are added for I2C devices). Returns how many were written (max 5).
 inline size_t pinsOf(const DeviceConfig& c, Chip chip, int8_t* out) {
@@ -339,13 +383,15 @@ inline DevErr validateDevice(const DeviceConfig& c, Chip chip, const DeviceConfi
     if (c.model == 1 && c.i2cAddr != 0x76 && c.i2cAddr != 0x77) return DevErr::I2cAddr;
   }
   if (c.type == DeviceType::Serial && !baudOk(chip, c.baud)) return DevErr::Baud;
+  if (c.failsafeS > kMaxFailsafeS || (c.failsafeS != 0 && !failsafeApplies(c.type))) return DevErr::Failsafe;
+  if (c.safeAngle != -1 && (c.type != DeviceType::Servo || c.safeAngle < 0 || c.safeAngle > 180)) return DevErr::SafeAngle;
   return DevErr::Ok;
 }
 
 // ---- commands -------------------------------------------------------------------------------
 
 enum class CmdAction : uint8_t { None, Set, Toggle, Stop, Send };
-enum class CmdErr : uint8_t { Ok, NotFound, NotCommandable, BadAction, BadValue, QueueFull, BadId };
+enum class CmdErr : uint8_t { Ok, NotFound, NotCommandable, BadAction, BadValue, QueueFull, BadId, Disabled };
 
 // One place for how a command error is named and which HTTP status it maps to (REST and WebSocket share it).
 inline const char* cmdErrCode(CmdErr e) {
@@ -356,6 +402,7 @@ inline const char* cmdErrCode(CmdErr e) {
     case CmdErr::BadAction: return "bad_action";
     case CmdErr::BadValue: return "bad_value";
     case CmdErr::QueueFull: return "busy";
+    case CmdErr::Disabled: return "disabled";
     default: return "bad_id";
   }
 }
@@ -371,7 +418,7 @@ inline int cmdErrHttp(CmdErr e) {
   switch (e) {
     case CmdErr::Ok: return 202;
     case CmdErr::NotFound: return 404;
-    case CmdErr::NotCommandable: return 409;
+    case CmdErr::NotCommandable: case CmdErr::Disabled: return 409;
     case CmdErr::QueueFull: return 503;
     default: return 400;
   }

@@ -34,6 +34,14 @@ dt{color:var(--dim)} dd{margin:0;word-break:break-word}
 .dev button.rm{background:none;border:0;color:var(--dim);padding:0;font:inherit;text-decoration:underline}
 .dev input[type=range]{width:100%;padding:0}
 .warn{color:#ffb020}
+.dev.off{opacity:.65}
+.tbl{width:100%;border-collapse:collapse;font-size:14px}
+.tbl th{text-align:left;color:var(--dim);font-weight:600;padding:4px 8px;border-bottom:1px solid var(--line)}
+.tbl td{padding:4px 8px;border-bottom:1px solid var(--line);word-break:break-word}
+.evlist{list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:14px}
+.evlist li{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 10px}
+.evlist .k{color:var(--acc);font-weight:600;margin-right:6px}
+.evlist .k.bad{color:var(--bad)}
 [hidden]{display:none!important}
 
 .sect{margin:20px 0 8px;color:var(--dim);font-size:13px;text-transform:uppercase;letter-spacing:.04em}

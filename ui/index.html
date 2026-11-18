@@ -35,6 +35,7 @@
   <button data-tab="dev">Devices</button>
   <button data-tab="automation">Automation</button>
   <button data-tab="net">Network</button>
+  <button data-tab="diag">Diagnostics</button>
   <button data-tab="sys">System</button>
 </nav>
 
@@ -153,6 +154,14 @@
           <select name="baud"><option>1200</option><option>2400</option><option>4800</option><option selected>9600</option><option>19200</option><option>38400</option><option>57600</option><option>115200</option></select>
         </label>
       </div>
+      <label class="row"><input name="enabled" type="checkbox" checked> Enabled <small class="hint">(a disabled device sits in its safe state and refuses commands)</small></label>
+      <div data-for="relay pwm motor servo">
+        <label>Failsafe after (seconds, 0 = off) <input name="failsafe_s" type="number" min="0" max="3600" value="0"></label>
+        <small class="hint">No command and no page heartbeat for this long: relay off, PWM 0 %, motor stopped. It stays safe until the next command.</small>
+      </div>
+      <div data-for="servo">
+        <label>Failsafe angle (degrees, blank = hold where it is) <input name="safe_angle" type="number" min="0" max="180"></label>
+      </div>
       <button type="submit" id="devsubmit">Add device</button>
       <button type="button" id="devcancel" hidden>Cancel edit</button>
       <p id="devmsg" role="status"></p>
@@ -161,6 +170,30 @@
       <h3>I2C bus <small id="i2cpins"></small></h3>
       <button id="i2cscan" type="button">Scan bus</button>
       <p id="i2cres" class="hint">Not scanned yet.</p>
+    </div>
+  </section>
+
+  <section id="diag" hidden>
+    <div class="grid">
+      <div class="card"><h3>Uptime</h3><p id="gup">-</p></div>
+      <div class="card"><h3>Last reset</h3><p id="grst">-</p><small id="grstnote"></small></div>
+      <div class="card"><h3>Longest loop gap</h3><p id="gloop">-</p><small>a stalled loop is what the watchdog catches</small></div>
+      <div class="card"><h3>Memory</h3><p id="gheap">-</p><small id="gheap2"></small></div>
+      <div class="card"><h3>Storage</h3><p id="gfs">-</p></div>
+      <div class="card"><h3>Live pages</h3><p id="gws">-</p></div>
+    </div>
+    <h3 class="sect">Devices</h3>
+    <table class="tbl" id="gdev"><thead><tr><th>ID</th><th>Type</th><th>State</th><th>Failsafe</th><th>Errors</th></tr></thead><tbody></tbody></table>
+    <h3 class="sect">Recent system events</h3>
+    <ul id="gevents" class="evlist"></ul>
+    <h3 class="sect">Automation history</h3>
+    <ul id="gauto" class="evlist"></ul>
+    <h3 class="sect">GPIO <small class="hint">read only: this page cannot change a pin. I2C bus scan is on the Devices tab.</small></h3>
+    <table class="tbl" id="ggpio"><thead><tr><th>GPIO</th><th>Label</th><th>Note</th><th>Used by</th><th>Level</th></tr></thead><tbody></tbody></table>
+    <h3 class="sect">Watchdog</h3>
+    <div class="card">
+      <button type="button" id="gwdt">Test the watchdog</button>
+      <p id="gwdtmsg" class="hint">Hangs the board on purpose; the chip's watchdog restarts it in a few seconds and the next reset reads "Watchdog". ESP8266 only.</p>
     </div>
   </section>
 
@@ -271,5 +304,6 @@
 <script src="app.js"></script>
 <script src="dash.js"></script>
 <script src="automation.js"></script>
+<script src="diag.js"></script>
 </body>
 </html>

@@ -1,5 +1,7 @@
 #include "AuthManager.h"
 
+#include "core/EventLog.h"
+
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <LittleFS.h>
@@ -49,9 +51,13 @@ AuthErr AuthManager::login(const char* password, char* token) {
   uint8_t rnd[kTokenBytes];
   hal::randomBytes(rnd, sizeof rnd);
   AuthErr e = core_.login(password, millis(), rnd, token);
-  if (e == AuthErr::Wrong) Serial.println("[auth] wrong password");
-  else if (e == AuthErr::Locked) Serial.println("[auth] login refused: locked out");
-  else Serial.println("[auth] login ok");
+  static bool wasLocked = false;  // a lock-out is one event, not one per refused attempt
+  if (e == AuthErr::Wrong) { Serial.println("[auth] wrong password"); logEvent("login_failed", "wrong password"); }
+  else if (e == AuthErr::Locked) {
+    Serial.println("[auth] login refused: locked out");
+    if (!wasLocked) logEvent("login_locked", "too many wrong passwords");
+  } else Serial.println("[auth] login ok");
+  wasLocked = e == AuthErr::Locked;
   return e;
 }
 
@@ -70,6 +76,7 @@ AuthErr AuthManager::changePassword(const char* current, const char* next, const
   bool saved = save();
   core_.endAllExcept(keepToken);
   Serial.printf("[auth] password changed (saved=%d)\n", saved);
+  logEvent("password", "changed");
   return AuthErr::Ok;
 }
 

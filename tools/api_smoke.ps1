@@ -607,6 +607,95 @@ foreach ($id in 'smoke_sr', 'smoke_sp') { Call DELETE "/devices?id=$id" | Out-Nu
 WaitGone
 
 
+Write-Host '== P8b failsafe, enable/disable, heartbeat, diagnostics (a few real seconds; close other open pages first: their heartbeat would keep the failsafe from firing)'
+$r = Call POST '/devices' @{ id = 'smoke_fs'; type = 'relay'; pin = $relayPin; failsafe_s = 3 }
+Check 'relay with a failsafe accepted' ($r.code -eq 202)
+$r = Call POST '/devices' @{ id = 'smoke_sv'; type = 'servo'; model = 'direct'; pin = $svoPin; failsafe_s = 3; safe_angle = 30 }
+Check 'servo with a failsafe angle accepted' ($r.code -eq 202)
+Settle
+$d = Dev 'smoke_fs'
+Check 'config lists enabled and the failsafe' ($d.enabled -eq $true -and $d.failsafe_s -eq 3)
+Check 'state shows the failsafe armed, not tripped' ($d.state.failsafe_tripped -eq $false)
+Check 'servo lists its safe angle' ((Dev 'smoke_sv').safe_angle -eq 30)
+
+$r = Call POST '/devices' @{ id = 'smoke_x'; type = 'input'; pin = $inPin; failsafe_s = 5 }
+Check 'failsafe on an input refused' ($r.code -eq 400 -and $r.json.error -eq 'bad_failsafe')
+$r = Call POST '/devices' @{ id = 'smoke_x'; type = 'relay'; pin = $inPin; failsafe_s = 3601 }
+Check 'failsafe over 3600 s refused' ($r.code -eq 400 -and $r.json.error -eq 'bad_failsafe')
+$r = Call POST '/devices' @{ id = 'smoke_x'; type = 'relay'; pin = $inPin; safe_angle = 90 }
+Check 'safe angle on a relay refused' ($r.code -eq 400 -and $r.json.error -eq 'bad_safe_angle')
+$r = Call POST '/devices' @{ id = 'smoke_x'; type = 'servo'; model = 'direct'; pin = $inPin; safe_angle = 181 }
+Check 'safe angle 181 refused' ($r.code -eq 400 -and $r.json.error -eq 'bad_safe_angle')
+$r = Call POST '/devices' @{ id = 'smoke_x'; type = 'relay'; pin = $inPin; enabled = 'yes' }
+Check 'enabled must be true or false' ($r.code -eq 400)
+
+Call POST '/command' @{ id = 'smoke_fs'; action = 'set'; value = $true } | Out-Null
+Call POST '/command' @{ id = 'smoke_sv'; action = 'set'; value = 120 } | Out-Null
+Settle
+Check 'relay is on' ((Dev 'smoke_fs').state.on -eq $true)
+Check 'servo moved to 120' ((Dev 'smoke_sv').state.angle -eq 120)
+for ($i = 0; $i -lt 6; $i++) { Call POST '/heartbeat' @{} | Out-Null; Start-Sleep -Milliseconds 1000 }
+Check 'heartbeats keep the failsafe from firing' ((Dev 'smoke_fs').state.on -eq $true -and (Dev 'smoke_fs').state.failsafe_tripped -eq $false)
+Check 'servo untouched too' ((Dev 'smoke_sv').state.angle -eq 120)
+Start-Sleep -Milliseconds 4500
+$d = Dev 'smoke_fs'
+Check 'without a heartbeat the relay goes off' ($d.state.on -eq $false)
+Check 'and the failsafe shows as tripped' ($d.state.failsafe_tripped -eq $true)
+$d = Dev 'smoke_sv'
+Check 'the servo went to its failsafe angle' ($d.state.angle -eq 30 -and $d.state.failsafe_tripped -eq $true)
+Call POST '/command' @{ id = 'smoke_fs'; action = 'set'; value = $true } | Out-Null
+Settle
+$d = Dev 'smoke_fs'
+Check 'a command resumes it and clears the trip' ($d.state.on -eq $true -and $d.state.failsafe_tripped -eq $false)
+
+$dg = Call GET '/diagnostics'
+Check 'diagnostics answers' ($dg.code -eq 200)
+Check 'diagnostics has the reset reason' ($dg.json.reset_reason -is [string] -and $dg.json.reset_reason.Length -gt 0)
+Check 'diagnostics says whether the watchdog did it' ($null -ne $dg.json.watchdog_reset -and $null -ne $dg.json.fault_reset)
+Check 'diagnostics has the longest loop gap' ($dg.json.loop_max_ms -is [int] -or $dg.json.loop_max_ms -is [long])
+Check 'diagnostics has the heap low-water mark' ($dg.json.heap.min_free -gt 0 -and $dg.json.heap.min_free -le $dg.json.heap.free + 4096)
+Check 'diagnostics lists the devices with their failsafe' (($dg.json.devices | Where-Object { $_.id -eq 'smoke_fs' }).failsafe_s -eq 3)
+Check 'the event log recorded the failsafe' ($dg.json.events | Where-Object { $_.kind -eq 'failsafe' -and $_.text -like 'smoke_fs*' })
+Check 'the event log counts events since boot' ($dg.json.events_total -ge 1 -and $dg.json.events.Count -ge 1)
+
+Check 'disable accepted' ((Call PUT '/devices' @{ id = 'smoke_fs'; enabled = $false }).code -eq 202)
+Settle
+$d = Dev 'smoke_fs'
+Check 'a disabled device is listed as disabled' ($d.enabled -eq $false)
+Check 'and sits in its safe state' ($d.state.on -eq $false)
+$r = Call POST '/command' @{ id = 'smoke_fs'; action = 'set'; value = $true }
+Check 'a command to it is refused (409 disabled)' ($r.code -eq 409 -and $r.json.error -eq 'disabled')
+Check 'a bad command is still a bad command' ((Call POST '/command' @{ id = 'smoke_fs'; action = 'explode' }).code -eq 400)
+Check 'the event log recorded the disable' ((Call GET '/diagnostics').json.events | Where-Object { $_.kind -eq 'device' -and $_.text -like 'smoke_fs disabled' })
+Check 'enable accepted' ((Call PUT '/devices' @{ id = 'smoke_fs'; enabled = $true }).code -eq 202)
+Settle
+Check 'enabled again' ((Dev 'smoke_fs').enabled -eq $true)
+Check 'it accepts commands again' ((Call POST '/command' @{ id = 'smoke_fs'; action = 'set'; value = $true }).code -eq 202)
+
+$g = Call GET '/gpio'
+Check 'gpio inspector answers' ($g.code -eq 200 -and $g.json.read_only -eq $true)
+Check 'gpio lists every pin of the chip' ($g.json.pins.Count -ge $(if ($Chip -eq 'esp8266') { 17 } else { 34 }))
+$pin = $g.json.pins | Where-Object { $_.gpio -eq $relayPin }
+Check 'gpio shows which device uses a pin' ($pin.use -eq 'smoke_fs')
+Check 'gpio shows a level for a usable pin' ($null -ne $pin.level)
+Check 'gpio does not read a flash pin' ($null -eq ($g.json.pins | Where-Object { $_.gpio -eq 6 }).level -and ($g.json.pins | Where-Object { $_.gpio -eq 6 }).note -eq 'flash')
+if ($Chip -eq 'esp8266') {
+  Check 'gpio gives the NodeMCU label' (($g.json.pins | Where-Object { $_.gpio -eq 5 }).label -eq 'D1')
+  $r = Call POST '/system/test-watchdog' @{ confirm = 'nope' }
+  Check 'the watchdog test needs the confirm word' ($r.code -eq 400 -and $r.json.error -eq 'confirm_required')
+}
+
+foreach ($ep in @('GET /diagnostics', 'GET /gpio', 'POST /heartbeat', 'POST /system/test-watchdog')) {
+  $m, $path = $ep -split ' '
+  Check "no login: $ep is 401" ((CallAs '' $m $path @{}).code -eq 401)
+}
+
+Call DELETE '/devices?id=smoke_fs' | Out-Null
+Start-Sleep -Milliseconds 400
+Call DELETE '/devices?id=smoke_sv' | Out-Null
+WaitGone
+
+
 Write-Host '== P8a security (the 5-miss lock-out is tested last and costs a 31 s wait)'
 function Anon($method, $path, $body) { CallAs '' $method $path $body }
 function Page($path) { try { (Invoke-WebRequest -UseBasicParsing -TimeoutSec 20 "http://$Ip$path").StatusCode } catch { [int]$_.Exception.Response.StatusCode } }

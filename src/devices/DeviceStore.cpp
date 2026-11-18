@@ -95,6 +95,16 @@ DevErr applyJson(JsonVariantConst src, DeviceConfig& cfg) {
   if (getInt(src["baud"], 0, 1000000, n, bad)) cfg.baud = uint32_t(n);
   if (bad) return DevErr::Baud;
 
+  // P8b fields. validateDevice applies the real limits (failsafe only on devices that drive something).
+  v = src["enabled"];
+  if (!v.isNull()) { if (!v.is<bool>()) return DevErr::Format; cfg.enabled = v.as<bool>(); }
+  bad = false;
+  if (getInt(src["failsafe_s"], 0, 65535, n, bad)) cfg.failsafeS = uint16_t(n);
+  if (bad) return DevErr::Failsafe;
+  bad = false;
+  if (getInt(src["safe_angle"], -1, 1000, n, bad)) cfg.safeAngle = int16_t(n);
+  if (bad) return DevErr::SafeAngle;
+
   if (cfg.type == DeviceType::Servo && !hasInitial) cfg.initial = 90;  // centred, not slammed to an end stop
   if (isI2cDevice(cfg) && cfg.i2cAddr == 0) cfg.i2cAddr = defaultI2cAddr(cfg);
 
@@ -108,6 +118,9 @@ void toJson(const DeviceConfig& c, JsonObject out) {
   out["type"] = deviceTypeName(c.type);
   out["pin"] = c.pin;
   out["invert"] = c.invert;
+  out["enabled"] = c.enabled;
+  if (failsafeApplies(c.type)) out["failsafe_s"] = c.failsafeS;
+  if (c.type == DeviceType::Servo && c.safeAngle >= 0) out["safe_angle"] = c.safeAngle;
   switch (c.type) {
     case DeviceType::Input:
       out["pullup"] = c.pullup;

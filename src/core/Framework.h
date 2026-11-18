@@ -24,6 +24,8 @@ class FrameworkController {
   void getSystemInfo(JsonObject out) const;  // static facts (/api/v1/system)
   void getStatus(JsonObject out) const;      // live numbers (/api/v1/status)
   void restart();                            // deferred ~400 ms so HTTP replies can flush
+  void requestWatchdogTest() { wdtTest_ = true; }  // ESP8266 only: hangs the loop on purpose so the watchdog resets the board
+  void getHealth(JsonObject out) const;      // what /api/v1/diagnostics adds to the status: loop gaps, heap low-water, reset kind
   void requestFactoryReset();                // deletes every saved config file, then restarts (queued; runs in loop())
 
   espwf::NetworkManager& network() { return net_; }
@@ -40,4 +42,6 @@ class FrameworkController {
   uint32_t restartAt_ = 0;
   bool restartPending_ = false;
   volatile bool resetPending_ = false;
+  volatile bool wdtTest_ = false;
+  uint32_t lastLoop_ = 0, loopMaxMs_ = 0, nextHeapSample_ = 0, minHeap_ = 0xFFFFFFFFu;
 };

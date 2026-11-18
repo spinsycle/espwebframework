@@ -84,6 +84,8 @@ void WsHub::onData(AsyncWebSocketClient* c, void* arg, uint8_t* data, size_t len
   const char* type = d["type"].is<const char*>() ? d["type"].as<const char*>() : "";
   if (!strcmp(type, "ping")) {
     c->text("{\"event\":\"pong\"}");
+  } else if (!strcmp(type, "heartbeat")) {  // the controller is still there: failsafe timers start over
+    dev_->heartbeat();
   } else if (!strcmp(type, "command")) {
     const char* id = nullptr;
     Command cmd;
@@ -102,9 +104,9 @@ void WsHub::scanStates(bool send) {
   for (size_t i = 0; i < n && i < kMaxDevices; i++) {
     if (!dev_->view(i, v)) break;
     Last now;
-    now.on = v.on; now.duty = v.duty; now.edges = v.edges;
+    now.on = v.on; now.duty = v.duty; now.edges = v.edges; now.val = v.val; now.tripped = v.tripped; now.ok = v.ok;
     Last& was = last_[i];
-    if (now.on == was.on && now.duty == was.duty && now.edges == was.edges) continue;
+    if (now.on == was.on && now.duty == was.duty && now.edges == was.edges && now.val == was.val && now.tripped == was.tripped && now.ok == was.ok) continue;
     if (send && !ws_->availableForWriteAll()) { dirty_ = true; return; }  // queue full: keep the old baseline, retry next pass
     was = now;
     if (!send) continue;

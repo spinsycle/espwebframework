@@ -603,6 +603,92 @@ SHA = [
     ("output order", "out[4 * i] = uint8_t(h_[i] >> 24);", "out[4 * i] = uint8_t(h_[i] >> 23);"),
 ]
 
+FAILSAFE = [
+    ("applies relay", "return t == DeviceType::Relay || t == DeviceType::Pwm || t == DeviceType::Motor || t == DeviceType::Servo;", "return t == DeviceType::Pwm || t == DeviceType::Motor || t == DeviceType::Servo;"),
+    ("applies pwm", "return t == DeviceType::Relay || t == DeviceType::Pwm || t == DeviceType::Motor || t == DeviceType::Servo;", "return t == DeviceType::Relay || t == DeviceType::Motor || t == DeviceType::Servo;"),
+    ("applies motor", "return t == DeviceType::Relay || t == DeviceType::Pwm || t == DeviceType::Motor || t == DeviceType::Servo;", "return t == DeviceType::Relay || t == DeviceType::Pwm || t == DeviceType::Servo;"),
+    ("applies servo", "return t == DeviceType::Relay || t == DeviceType::Pwm || t == DeviceType::Motor || t == DeviceType::Servo;", "return t == DeviceType::Relay || t == DeviceType::Pwm || t == DeviceType::Motor;"),
+    ("applies input", "return t == DeviceType::Relay || t == DeviceType::Pwm || t == DeviceType::Motor || t == DeviceType::Servo;", "return t == DeviceType::Relay || t == DeviceType::Pwm || t == DeviceType::Motor || t == DeviceType::Servo || t == DeviceType::Input;"),
+    ("due off", "return timeoutS != 0 && uint32_t(now - lastAlive) >= uint32_t(timeoutS) * 1000u;", "return uint32_t(now - lastAlive) >= uint32_t(timeoutS) * 1000u;"),
+    ("due boundary", "uint32_t(now - lastAlive) >= uint32_t(timeoutS) * 1000u;", "uint32_t(now - lastAlive) > uint32_t(timeoutS) * 1000u;"),
+    ("due units", "uint32_t(now - lastAlive) >= uint32_t(timeoutS) * 1000u;", "uint32_t(now - lastAlive) >= uint32_t(timeoutS) * 100u;"),
+    ("due overflow", "uint32_t(now - lastAlive) >= uint32_t(timeoutS) * 1000u;", "uint32_t(now - lastAlive) >= uint32_t(uint16_t(timeoutS * 1000u));"),
+    ("due wrap", "uint32_t(now - lastAlive) >= uint32_t(timeoutS) * 1000u;", "now >= lastAlive + uint32_t(timeoutS) * 1000u;"),
+    ("newer unsigned", "return int32_t(a - b) >= 0 ? a : b;", "return a >= b ? a : b;"),
+    ("newer inverted", "return int32_t(a - b) >= 0 ? a : b;", "return int32_t(a - b) <= 0 ? a : b;"),
+    ("safe relay", "case DeviceType::Relay: case DeviceType::Pwm: case DeviceType::Motor: t.act = true; break;", "case DeviceType::Relay: case DeviceType::Pwm: t.act = true; break;"),
+    ("safe motor", "case DeviceType::Relay: case DeviceType::Pwm: case DeviceType::Motor: t.act = true; break;", "case DeviceType::Relay: case DeviceType::Motor: t.act = true; break;"),
+    ("safe pwm", "case DeviceType::Relay: case DeviceType::Pwm: case DeviceType::Motor: t.act = true; break;", "case DeviceType::Pwm: case DeviceType::Motor: t.act = true; break;"),
+    ("safe servo zero", "if (c.safeAngle >= 0) { t.act = true; t.val = c.safeAngle; }", "if (c.safeAngle > 0) { t.act = true; t.val = c.safeAngle; }"),
+    ("safe servo angle", "if (c.safeAngle >= 0) { t.act = true; t.val = c.safeAngle; }", "if (c.safeAngle >= 0) { t.act = true; t.val = 90; }"),
+    ("safe servo always", "if (c.safeAngle >= 0) { t.act = true; t.val = c.safeAngle; }", "{ t.act = true; t.val = c.safeAngle; }"),
+    ("max seconds", "constexpr uint16_t kMaxFailsafeS = 3600;", "constexpr uint16_t kMaxFailsafeS = 3601;"),
+    ("validate max", "c.failsafeS > kMaxFailsafeS ||", "c.failsafeS >= kMaxFailsafeS ||"),
+    ("validate type", "(c.failsafeS != 0 && !failsafeApplies(c.type))", "(false)"),
+    ("validate seconds", "if (c.failsafeS > kMaxFailsafeS ||", "if (false ||"),
+    ("angle sentinel", "c.safeAngle != -1 && (c.type", "c.safeAngle != 0 && (c.type"),
+    ("angle servo only", "(c.type != DeviceType::Servo || c.safeAngle < 0 || c.safeAngle > 180)", "(c.safeAngle < 0 || c.safeAngle > 180)"),
+    ("angle upper", "c.safeAngle > 180)", "c.safeAngle > 181)"),
+    ("code failsafe", 'case DevErr::Failsafe: return "bad_failsafe";', 'case DevErr::Failsafe: return "bad_format";'),
+    ("code angle", 'case DevErr::SafeAngle: return "bad_safe_angle";', 'case DevErr::SafeAngle: return "bad_format";'),
+    ("field failsafe", 'case DevErr::Failsafe: return "failsafe_s";', 'case DevErr::Failsafe: return "";'),
+    ("field angle", 'case DevErr::SafeAngle: return "safe_angle";', 'case DevErr::SafeAngle: return "";'),
+    ("disabled code", 'case CmdErr::Disabled: return "disabled";', 'case CmdErr::Disabled: return "off";'),
+    ("disabled http", "case CmdErr::NotCommandable: case CmdErr::Disabled: return 409;", "case CmdErr::NotCommandable: return 409;"),
+    ("default enabled", "bool enabled = true;       // a disabled", "bool enabled = false;       // a disabled"),
+    ("default angle", "int16_t safeAngle = -1;", "int16_t safeAngle = 0;"),
+]
+
+RING = [
+    ("full drops oldest", "if (count_ == kSysEventCap) head_ = uint8_t((head_ + 1) % kSysEventCap);", "if (count_ == kSysEventCap) head_ = head_;"),
+    ("head step", "head_ = uint8_t((head_ + 1) % kSysEventCap);", "head_ = uint8_t((head_ + 2) % kSysEventCap);"),
+    ("count grows", "    else count_++;", "    else count_ += 0;"),
+    ("newest index", "out = e_[(head_ + count_ - 1 - i) % kSysEventCap];", "out = e_[(head_ + count_ - i) % kSysEventCap];"),
+    ("newest range", "if (i >= count_) return false;", "if (i > count_) return false;"),
+    ("total", "    total_++;", ""),
+    ("cut length", "if (n > cap - 1) n = cap - 1;", "if (n > cap) n = cap;"),
+    ("null text", "size_t n = src ? strlen(src) : 0;", "size_t n = strlen(src);"),
+    ("kind copied", "copy(e.kind, kind, kEventKindCap);", ""),
+    ("text copied", "copy(e.text, text, kEventTextCap);", ""),
+    ("time kept", "    e.epoch = epoch;", ""),
+    ("uptime kept", "    e.upS = upS;", ""),
+]
+
+HEALTH = [
+    ("case blind", "tolower((unsigned char)p[k]) == tolower((unsigned char)word[k])", "p[k] == word[k]"),
+    ("match whole word", "if (k == n) return true;", "if (k == n + 1) return true;"),
+    ("empty word", "if (!reason || !word || !*word) return false;", "if (!reason || !word) return false;"),
+    ("wdt", '|| reasonHas(reason, "wdt");', ";"),
+    ("watchdog", 'return reasonHas(reason, "watchdog") ||', 'return false ||'),
+    ("fault exception", '|| reasonHas(reason, "exception")', ""),
+    ("fault panic", '|| reasonHas(reason, "panic")', ""),
+    ("fault brownout", '|| reasonHas(reason, "brownout")', ""),
+    ("fault watchdog", "return isWatchdogReason(reason) ||", "return false ||"),
+]
+
+PININFO = [
+    ("label D0", 'case 16: return "D0";', 'case 16: return "D1";'),
+    ("label D1", 'case 5: return "D1";', 'case 5: return "D2";'),
+    ("label D2", 'case 4: return "D2";', 'case 4: return "D3";'),
+    ("label D3", 'case 0: return "D3";', 'case 0: return "D4";'),
+    ("label D4", 'case 2: return "D4";', 'case 2: return "D5";'),
+    ("label D5", 'case 14: return "D5";', 'case 14: return "D6";'),
+    ("label D6", 'case 12: return "D6";', 'case 12: return "D7";'),
+    ("label D7", 'case 13: return "D7";', 'case 13: return "D8";'),
+    ("label D8", 'case 15: return "D8";', 'case 15: return "D0";'),
+    ("label RX", 'case 3: return "RX";', 'case 3: return "TX";'),
+    ("label TX", 'case 1: return "TX";', 'case 1: return "RX";'),
+    ("label esp32", "if (chip != Chip::Esp8266) return \"\";", ""),
+    ("note uart", '(gpio == 1 || gpio == 3) ? "uart" : "flash"', '(gpio == 1) ? "uart" : "flash"'),
+    ("note flash", '(gpio == 1 || gpio == 3) ? "uart" : "flash"', '(gpio == 1 || gpio == 3) ? "flash" : "uart"'),
+    ("note reserved", "if (checkPin(chip, gpio, PinRole::Input) == PinErr::Reserved) return", "if (false) return"),
+    ("note strapping", 'if (pinBootSensitive(chip, gpio)) return "strapping";', ""),
+    ("note input only", 'PinErr::InputOnly) return "input_only";', 'PinErr::InputOnly) return "";'),
+    ("note no pwm", 'PinErr::NoPwm) return "no_pwm";', 'PinErr::NoPwm) return "";'),
+    ("listed", "return checkPin(chip, gpio, PinRole::Input) != PinErr::Invalid;", "return checkPin(chip, gpio, PinRole::Input) == PinErr::Ok;"),
+    ("readable", "return checkPin(chip, gpio, PinRole::Input) == PinErr::Ok;", "return checkPin(chip, gpio, PinRole::Input) != PinErr::Invalid;"),
+]
+
 SETS = [
     ("devices", "src/devices/DeviceTypes.h", "test_devices", DEVICES),
     ("p4", "src/devices/DeviceTypes.h", "test_p4", P4),
@@ -619,6 +705,10 @@ SETS = [
     ("sha256", "src/security/Sha256.h", "test_p8", SHA),
     ("queue", "src/devices/OpQueue.h", "test_ws", QUEUE),
     ("limiter", "src/net/RateLimiter.h", "test_ws", LIMITER),
+    ("failsafe", "src/devices/DeviceTypes.h", "test_p8b", FAILSAFE),
+    ("event ring", "src/core/EventRing.h", "test_p8b", RING),
+    ("health", "src/core/HealthRules.h", "test_p8b", HEALTH),
+    ("pin info", "src/devices/PinInfo.h", "test_p8b", PININFO),
 ]
 
 def run_tests(folder):
