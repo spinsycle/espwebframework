@@ -1,11 +1,22 @@
 # PlatformIO pre-script: gzip ui/* into <build>/fsdata/www/*.gz and point the
 # filesystem image at it, so `pio run -t uploadfs` ships a compressed UI.
-# ponytail: assumes the framework repo layout; app projects get a wrapper in P9.
+# Works in the framework repo (ui/ next to platformio.ini) and in an app repo: with no ui/ of its own it
+# uses the one inside the installed framework library, .pio/libdeps/<env>/espwebframework/ui.
 Import("env")
 import gzip, os, shutil
 
 project = env.subst("$PROJECT_DIR")
 src = os.path.join(project, "ui")
+if not os.path.isdir(src):
+    libs = os.path.join(project, ".pio", "libdeps", env.subst("$PIOENV"))
+    link = os.path.join(libs, "espwebframework.pio-link")  # a symlink:// install leaves this note instead of a folder
+    src = os.path.join(libs, "espwebframework", "ui")
+    if os.path.isfile(link):
+        import json
+        spec = json.load(open(link))
+        src = os.path.join(os.path.normpath(os.path.join(spec["cwd"], spec["spec"]["uri"][len("symlink://"):])), "ui")
+    if not os.path.isdir(src):
+        print("build_ui: no ui/ here and the framework library is not installed yet; run `pio pkg install` and build again")
 out = os.path.join(project, ".pio", "fsdata", env.subst("$PIOENV"))
 www = os.path.join(out, "www")
 

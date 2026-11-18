@@ -1,5 +1,11 @@
 # Changelog
 
+## P9b (docs and examples, before the v1.0 tag)
+- Docs: `docs/API.md` (every route and WebSocket message), `DRIVERS.md` (every device type and how to add one), `CONFIG.md` (the config files and the automation JSON), `INSTALL.md` (PlatformIO, flashing, first sign-in), `SAFETY.md` (what the software does not protect and the known limits). README rewritten.
+- `examples/relay_controller`: a complete app (one `main.cpp`) built by the gate-style build; the framework comes in as a library.
+- `tools/build_ui.py` now also works in an app repo: with no `ui/` of its own it uses the one inside the installed framework library (including a `symlink://` install).
+- `tools/soak.py`: the 24 hour polling logger used for the memory acceptance run.
+
 ## P8b
 - Failsafe per device (relay, PWM, motor, servo): `failsafe_s` (0 = off, up to 3600) is how long the device may go without a command **or a heartbeat** before it goes to its safe state: relay off, PWM 0 %, motor stopped, servo holds or moves to `safe_angle` (0-180, -1 / absent = hold). The board does this on its own in `loop()`, with no browser involved. It latches: the device stays safe until the next command to it (a heartbeat does not resume it), the state shows `failsafe_tripped`, and an event is logged. Inputs, sensors and the serial port have nothing to switch off and refuse a failsafe (`bad_failsafe`).
 - Heartbeat: `POST /api/v1/heartbeat` or the WebSocket message `{"type":"heartbeat"}` from any signed-in client restarts every failsafe timer. The UI sends one a second while a page is open **and visible**, so a hidden tab, a locked phone or a closed page lets the failsafe fire. Commands from automation count as commands. A device given a failsafe on a board with no controller connected goes safe that many seconds after boot.
