@@ -1,6 +1,6 @@
 {
   "name": "espwebframework",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "Reusable web control framework for ESP8266 and ESP32",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/spinsycle/espwebframework.git" },
@@ -8,6 +8,7 @@
   "platforms": ["espressif8266", "espressif32"],
   "dependencies": [
     {"owner": "esp32async", "name": "ESPAsyncWebServer", "version": "3.12.1"},
-    {"owner": "bblanchon", "name": "ArduinoJson", "version": "7.4.3"}
+    {"owner": "bblanchon", "name": "ArduinoJson", "version": "7.4.3"},
+    {"owner": "paulstoffregen", "name": "OneWire", "version": "2.3.8"}
   ]
 }

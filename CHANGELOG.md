@@ -1,6 +1,9 @@
 # Changelog
 
-## P9b (docs and examples, before the v1.0 tag)
+## v1.0.0
+First stable release: the full spec on the ESP8266 NodeMCU (every phase P0-P8b passed its hardware checklist), the ESP32 build compiling and passing the native tests with its hardware checklists still open. From here the `/api/v1` surface, the `schema_version` 1 config format, device type and model names and error codes are frozen (`tools/check_frozen.py`): additions only. See `docs/SAFETY.md` for the known limits.
+
+## P9b (docs and examples)
 - Docs: `docs/API.md` (every route and WebSocket message), `DRIVERS.md` (every device type and how to add one), `CONFIG.md` (the config files and the automation JSON), `INSTALL.md` (PlatformIO, flashing, first sign-in), `SAFETY.md` (what the software does not protect and the known limits). README rewritten.
 - `examples/relay_controller`: a complete app (one `main.cpp`) built by the gate-style build; the framework comes in as a library.
 - `tools/build_ui.py` now also works in an app repo: with no `ui/` of its own it uses the one inside the installed framework library (including a `symlink://` install).
