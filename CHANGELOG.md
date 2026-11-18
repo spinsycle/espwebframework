@@ -4,6 +4,7 @@
 - Docs: `docs/API.md` (every route and WebSocket message), `DRIVERS.md` (every device type and how to add one), `CONFIG.md` (the config files and the automation JSON), `INSTALL.md` (PlatformIO, flashing, first sign-in), `SAFETY.md` (what the software does not protect and the known limits). README rewritten.
 - `examples/relay_controller`: a complete app (one `main.cpp`) built by the gate-style build; the framework comes in as a library.
 - `tools/build_ui.py` now also works in an app repo: with no `ui/` of its own it uses the one inside the installed framework library (including a `symlink://` install).
+- Freeze check: `tools/check_frozen.py` compares 222 API items (routes, WebSocket messages and events, device types and models, trigger, operator, action, step and component names, error codes, config schema version) with `tools/frozen_api.txt`; a removal or rename fails the gate, an addition fails until frozen on purpose with `--update`. Routes are checked by path, not method.
 - `tools/soak.py`: the 24 hour polling logger used for the memory acceptance run.
 
 ## P8b

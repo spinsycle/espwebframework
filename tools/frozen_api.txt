@@ -1,0 +1,222 @@
+actName: event
+actName: off
+actName: on
+actName: send
+actName: seq_start
+actName: seq_stop
+actName: set
+actName: stop
+actName: timer_start
+actName: timer_stop
+actName: toggle
+authErrCode: bad_credentials
+authErrCode: default_password
+authErrCode: locked
+authErrCode: weak_password
+autoErrCode: bad_action
+autoErrCode: bad_actions
+autoErrCode: bad_conditions
+autoErrCode: bad_cooldown
+autoErrCode: bad_days
+autoErrCode: bad_duration
+autoErrCode: bad_format
+autoErrCode: bad_id
+autoErrCode: bad_interlock
+autoErrCode: bad_loop
+autoErrCode: bad_name
+autoErrCode: bad_offset
+autoErrCode: bad_operator
+autoErrCode: bad_property
+autoErrCode: bad_steps
+autoErrCode: bad_time
+autoErrCode: bad_timer
+autoErrCode: bad_trigger
+autoErrCode: bad_value
+autoErrCode: busy
+autoErrCode: duplicate_id
+autoErrCode: not_found
+autoErrCode: too_many
+autoErrCode: unknown_device
+autoErrCode: unknown_target
+cmdErrCode: bad_action
+cmdErrCode: bad_id
+cmdErrCode: bad_value
+cmdErrCode: busy
+cmdErrCode: disabled
+cmdErrCode: not_commandable
+cmdErrCode: not_found
+compTypeName: device_card
+compTypeName: dropdown
+compTypeName: gauge
+compTypeName: graph
+compTypeName: group_panel
+compTypeName: joystick
+compTypeName: numeric
+compTypeName: progress
+compTypeName: push_button
+compTypeName: slider
+compTypeName: status
+compTypeName: text
+compTypeName: timer
+compTypeName: toggle
+config schema_version: 1
+dashErrCode: bad_action
+dashErrCode: bad_format
+dashErrCode: bad_id
+dashErrCode: bad_label
+dashErrCode: bad_layout
+dashErrCode: bad_mode
+dashErrCode: bad_options
+dashErrCode: bad_property
+dashErrCode: bad_tab
+dashErrCode: bad_tabs
+dashErrCode: bad_type
+dashErrCode: duplicate_id
+dashErrCode: overlap
+dashErrCode: too_many
+dashErrCode: unknown_device
+devErrCode: address_in_use
+devErrCode: bad_baud
+devErrCode: bad_channel
+devErrCode: bad_debounce
+devErrCode: bad_failsafe
+devErrCode: bad_format
+devErrCode: bad_freq
+devErrCode: bad_i2c_addr
+devErrCode: bad_id
+devErrCode: bad_initial
+devErrCode: bad_interval
+devErrCode: bad_long_ms
+devErrCode: bad_model
+devErrCode: bad_name
+devErrCode: bad_pin
+devErrCode: bad_pulse
+devErrCode: bad_safe_angle
+devErrCode: bad_type
+devErrCode: duplicate_id
+devErrCode: freq_conflict
+devErrCode: not_found
+devErrCode: pin_in_use
+devErrCode: pin_input_only
+devErrCode: pin_no_pullup
+devErrCode: pin_no_pwm
+devErrCode: pin_reserved
+devErrCode: too_many_devices
+devErrCode: too_many_pwm
+devErrCode: too_many_serial
+deviceTypeName: input
+deviceTypeName: motor
+deviceTypeName: pwm
+deviceTypeName: relay
+deviceTypeName: sensor
+deviceTypeName: serial
+deviceTypeName: servo
+http error: bad_format
+http error: bad_id
+http error: busy
+http error: confirm_required
+http error: invalid_network_config
+http error: locked
+http error: not_found
+http error: not_supported
+http error: out_of_memory
+http error: password_change_required
+http error: pin_in_use
+http error: save_failed
+http error: too_many_devices
+http error: unauthorized
+http error: unsupported_schema
+http error: wrong_password
+modelName: bme280
+modelName: direct
+modelName: ds18b20
+modelName: pca9685
+netModeName: ap
+netModeName: ap_sta
+netModeName: sta
+opName: !=
+opName: <
+opName: <=
+opName: ==
+opName: >
+opName: >=
+parseAction: send
+parseAction: set
+parseAction: stop
+parseAction: toggle
+parseDeviceType: input
+parseDeviceType: motor
+parseDeviceType: pwm
+parseDeviceType: relay
+parseDeviceType: sensor
+parseDeviceType: serial
+parseDeviceType: servo
+parseNetMode: ap
+parseNetMode: ap_sta
+parseNetMode: sta
+propName: count
+propName: humidity
+propName: level
+propName: ok
+propName: pressure_hpa
+propName: state
+propName: temp_c
+propName: text
+route: /api/v1/automation
+route: /api/v1/automation/rules
+route: /api/v1/automation/rules/disable
+route: /api/v1/automation/rules/enable
+route: /api/v1/automation/rules/run
+route: /api/v1/automation/schema
+route: /api/v1/automation/sequences
+route: /api/v1/automation/sequences/pause
+route: /api/v1/automation/sequences/resume
+route: /api/v1/automation/sequences/start
+route: /api/v1/automation/sequences/stop
+route: /api/v1/automation/settings
+route: /api/v1/automation/status
+route: /api/v1/automation/timers
+route: /api/v1/automation/timers/start
+route: /api/v1/automation/timers/stop
+route: /api/v1/command
+route: /api/v1/config/export
+route: /api/v1/config/factory-reset
+route: /api/v1/config/import
+route: /api/v1/dashboard
+route: /api/v1/dashboard/schema
+route: /api/v1/devices
+route: /api/v1/diagnostics
+route: /api/v1/gpio
+route: /api/v1/heartbeat
+route: /api/v1/i2c
+route: /api/v1/i2c/scan
+route: /api/v1/network
+route: /api/v1/password
+route: /api/v1/session
+route: /api/v1/status
+route: /api/v1/system
+route: /api/v1/system/restart
+route: /api/v1/system/test-watchdog
+route: /api/v1/system/update
+route: /ws
+stepName: do
+stepName: until
+stepName: wait
+trigName: change
+trigName: interval
+trigName: manual
+trigName: schedule
+trigName: sequence
+trigName: startup
+trigName: timer
+trigName: when
+trigName: wifi
+ws event: device_state
+ws event: devices_changed
+ws event: error
+ws event: hello
+ws event: pong
+ws event: status
+ws message: command
+ws message: heartbeat
+ws message: ping
