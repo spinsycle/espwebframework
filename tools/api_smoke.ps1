@@ -16,14 +16,21 @@ function CallAs($token, $method, $path, $body, $cookies = $null) {
     $args.WebSession = $jar
   }
   if ($body) { $args.Body = ($body | ConvertTo-Json -Compress -Depth 8); $args.ContentType = 'application/json' }
-  try {
-    $r = Invoke-WebRequest @args
-    return @{ code = [int]$r.StatusCode; json = ($r.Content | ConvertFrom-Json) }
-  } catch {
-    $resp = $_.Exception.Response
-    if (-not $resp) { throw }
-    $t = $_.ErrorDetails.Message   # PowerShell 5.1 already consumed the response stream; the body is here
-    return @{ code = [int]$resp.StatusCode; json = ($(if ($t) { $t | ConvertFrom-Json } else { $null })) }
+  # The home Wi-Fi sometimes drops the board for a few seconds. A request with no answer is retried once if it is
+  # a read; for anything else (it may have been applied) it counts as code 0, so the check fails but the run goes on.
+  for ($try = 1; $try -le 2; $try++) {
+    try {
+      $r = Invoke-WebRequest @args
+      return @{ code = [int]$r.StatusCode; json = ($r.Content | ConvertFrom-Json) }
+    } catch {
+      $resp = $_.Exception.Response
+      if ($resp) {
+        $t = $_.ErrorDetails.Message   # PowerShell 5.1 already consumed the response stream; the body is here
+        return @{ code = [int]$resp.StatusCode; json = ($(if ($t) { $t | ConvertFrom-Json } else { $null })) }
+      }
+      if ($method -ne 'GET' -or $try -eq 2) { Write-Host "  (no answer from the board for $method $path)"; return @{ code = 0; json = $null } }
+      Start-Sleep -Seconds 4
+    }
   }
 }
 function Call($method, $path, $body) { CallAs $script:token $method $path $body }
@@ -683,7 +690,11 @@ function PostFile($token, $name, [byte[]]$bytes, $query = '') {
   if ($token) { $hc.DefaultRequestHeaders.Add('Authorization', "Bearer $token") }
   $mp = New-Object System.Net.Http.MultipartFormDataContent
   $fc = New-Object System.Net.Http.ByteArrayContent(, $bytes)
-  $mp.Add($fc, 'firmware', $name)
+  # The board's multipart parser wants quoted names, as browsers send them; .NET leaves them bare by default.
+  $fc.Headers.ContentDisposition = New-Object System.Net.Http.Headers.ContentDispositionHeaderValue 'form-data'
+  $fc.Headers.ContentDisposition.Name = '"firmware"'
+  $fc.Headers.ContentDisposition.FileName = '"' + $name + '"'
+  $mp.Add($fc)
   try {
     $resp = $hc.PostAsync("http://$Ip/api/v1/system/update$query", $mp).Result
     $txt = $resp.Content.ReadAsStringAsync().Result
