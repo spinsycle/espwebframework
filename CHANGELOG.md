@@ -12,6 +12,7 @@
 - WebSocket: `device_state` now also goes out when a motor speed, servo angle, sensor `ok` or a failsafe state changes (the comparison used to look at relay, PWM and edge count only).
 - Native tests 253 (new: failsafe timing across the millis wrap, safe targets, config limits, event ring, reset-reason parser, GPIO facts), mutation check 74 more mutants, live API test extended (`tools/api_smoke.ps1` section P8b: failsafe fires and is held off by heartbeats, disable/enable, diagnostics, GPIO, auth on the new routes). The smoke needs every other page closed: their heartbeat would keep the failsafe from firing.
 - Memory: static RAM 61.3% (about 50 KB of 80 KB), 2 KB more than P8a (the event ring and the new per-device fields); ESP32 flash 81.5% of its slot. P9 trims.
+- Test note: `tools/api_smoke.ps1` makes hundreds of short connections and the ESP8266 cannot accept new ones until its lingering connections time out (about 2 minutes). Start a run at least 2 to 3 minutes after the previous one (or after a reboot), or the next run fails in a cascade that looks like a firmware bug but is not (shown by repeated clean 324/324 runs on a rested board).
 - Found on the way: the smoke's OTA section failed because .NET sends multipart names unquoted and the board's parser wants them quoted; the smoke now quotes them. A LittleFS overlap crash seen once during testing did not recur; the write guard stays.
 
 ## P8a

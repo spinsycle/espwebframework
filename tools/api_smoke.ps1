@@ -687,7 +687,7 @@ if ($Chip -eq 'esp8266') {
 
 foreach ($ep in @('GET /diagnostics', 'GET /gpio', 'POST /heartbeat', 'POST /system/test-watchdog')) {
   $m, $path = $ep -split ' '
-  Check "no login: $ep is 401" ((CallAs '' $m $path @{}).code -eq 401)
+  Check "no login: $ep is 401" ((CallAs '' $m $path $(if ($m -eq 'GET') { $null } else { @{} })).code -eq 401)
 }
 
 Call DELETE '/devices?id=smoke_fs' | Out-Null
@@ -698,10 +698,16 @@ WaitGone
 
 Write-Host '== P8a security (the 5-miss lock-out is tested last and costs a 31 s wait)'
 function Anon($method, $path, $body) { CallAs '' $method $path $body }
-function Page($path) { try { (Invoke-WebRequest -UseBasicParsing -TimeoutSec 20 "http://$Ip$path").StatusCode } catch { [int]$_.Exception.Response.StatusCode } }
+function Page($path) {
+  for ($i = 0; $i -lt 3; $i++) {  # the board refuses new connections for a moment after a burst of requests
+    try { return (Invoke-WebRequest -UseBasicParsing -TimeoutSec 20 "http://$Ip$path").StatusCode }
+    catch { if ($_.Exception.Response) { return [int]$_.Exception.Response.StatusCode }; Start-Sleep -Seconds 2 }
+  }
+  return 0
+}
 
 Check 'the page itself loads without a login' ((Page '/') -eq 200)
-Check 'the page scripts load without a login' ((Page '/app.js') -eq 200)
+Check 'the page scripts load without a login' ((Page '/bundle.js') -eq 200 -and (Page '/style.css') -eq 200)
 $ss = Anon GET '/session'
 Check 'GET /session without a token says not authenticated' ($ss.code -eq 200 -and $ss.json.authenticated -eq $false)
 $ss = Call GET '/session'

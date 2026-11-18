@@ -28,7 +28,7 @@ How the failsafe works: a device with a failsafe time (seconds, 0 = off) goes to
 | 19 | `curl -X POST -H "Content-Type: application/json" -d "{\"confirm\":\"hang\"}" http://<ip>/api/v1/system/test-watchdog` **without** signing in answers 401 and does not hang the board. With a session but a wrong word it answers 400 `confirm_required` | | |
 | 20 | Everything from P8a still works: sign in, change password, log out, live updates, and the firmware update (install the built `.bin`: the board restarts and the events show `ota` then `boot`) | | |
 | 21 | Memory: Diagnostics heap "lowest" stays above 3 KB after rows 1-19, and saving a rule and a sequence still works (no `out_of_memory`) | | |
-| 22 | `tools\api_smoke.ps1 -Ip <ip> -Password <yours>` with **every other page closed** (their heartbeat would keep the failsafe from firing): all checks pass. It ends with the 32-second lock-out wait | | |
+| 22 | `tools\api_smoke.ps1 -Ip <ip> -Password <yours>` with **every other page closed** (their heartbeat would keep the failsafe from firing): all checks pass. It ends with the 32-second lock-out wait. Wait 3 minutes after any earlier test run first (the board refuses new connections for about 2 minutes after a burst) | | |
 | 23 | `tools\api_smoke.ps1 -Ip <ip> -Password <yours> -Ota`: also installs the built firmware; all checks pass | | |
 
 ESP32: the watchdog test answers 501 `not_supported` there (the Arduino loop task is not watched by default), so row 18 stays open for that chip. Everything else applies.
