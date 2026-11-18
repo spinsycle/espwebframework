@@ -98,16 +98,16 @@ function autoRenderStatus() {
     const s = statusOf(card.dataset.rule);
     const line = card.querySelector(".rstat");
     if (!s || !line) return;
-    line.textContent = "ran " + s.fired + "x" + (s.fired ? " (" + ago(s.fired_ago_s) + ")" : "") + " · last: " + s.last.replace("_", " ") +
-      (s.failed ? " · " + s.failed + " failed" : "") + (s.unconfirmed ? " · " + s.unconfirmed + " not confirmed" : "");
+    line.textContent = "ran " + s.fired + "x" + (s.fired ? " (" + ago(s.fired_ago_s) + ")" : "") + " Â· last: " + s.last.replace("_", " ") +
+      (s.failed ? " Â· " + s.failed + " failed" : "") + (s.unconfirmed ? " Â· " + s.unconfirmed + " not confirmed" : "");
     line.className = "rstat" + (s.failed || s.unconfirmed ? " warn" : "");
   });
   $("aseqlist").querySelectorAll("[data-seq]").forEach((card) => {
     const q = (astat.sequences || []).find((x) => x.id === card.dataset.seq);
     const line = card.querySelector(".live");
     if (!q || !line) return;
-    line.textContent = q.state === "idle" ? "idle � finished " + q.done + "x, stopped " + q.stopped + "x" :
-      q.state + " � step " + q.step + " of " + q.steps + (q.repeat !== 1 ? " � pass " + q.pass : "") + (q.waiting_s !== undefined ? (q.until ? " � waiting for a condition, " : " � ") + q.waiting_s + " s" : "");
+    line.textContent = q.state === "idle" ? "idle · finished " + q.done + "x, stopped " + q.stopped + "x" :
+      q.state + " · step " + q.step + " of " + q.steps + (q.repeat !== 1 ? " · pass " + q.pass : "") + (q.waiting_s !== undefined ? (q.until ? " · waiting for a condition, " : " · ") + q.waiting_s + " s" : "");
     line.className = "live" + (q.state === "running" ? " on" : "");
     const btns = card.querySelectorAll(".rbar button");
     btns.forEach((b) => { if (b.dataset.ctl) b.hidden = !({ idle: ["start"], running: ["pause", "stop"], paused: ["resume", "stop"] }[q.state] || []).includes(b.dataset.ctl); });
@@ -116,12 +116,12 @@ function autoRenderStatus() {
     const t = (astat.timers || []).find((x) => x.id === card.dataset.timer);
     const line = card.querySelector(".live");
     if (!t || !line) return;
-    line.textContent = (t.running ? "running � " + aMmss(t.remaining_s) + " left" : "stopped") + " � finished " + t.finished + "x";
+    line.textContent = (t.running ? "running · " + aMmss(t.remaining_s) + " left" : "stopped") + " · finished " + t.finished + "x";
     line.className = "live" + (t.running ? " on" : "");
     card.querySelectorAll(".rbar button").forEach((b) => { if (b.dataset.ctl === "stop") b.hidden = !t.running; });
   });
   const ev = $("aevents");
-  ev.replaceChildren(...(astat.events.length ? astat.events.map((e) => el("li", { textContent: ago(e.ago_s) + " · " + e.rule + " · " + e.kind + (e.text ? " · " + e.text : "") })) : [el("li", { className: "hint", textContent: "Nothing yet." })]));
+  ev.replaceChildren(...(astat.events.length ? astat.events.map((e) => el("li", { textContent: ago(e.ago_s) + " Â· " + e.rule + " Â· " + e.kind + (e.text ? " Â· " + e.text : "") })) : [el("li", { className: "hint", textContent: "Nothing yet." })]));
 }
 
 function autoRender() {
@@ -421,7 +421,7 @@ function describeStep(s) {
 function seqCard(q) {
   const card = el("div", { className: "card rule" });
   card.dataset.seq = q.id;
-  card.append(el("div", { className: "top" }, el("strong", { textContent: q.name || q.id }), el("small", { textContent: q.steps.length + " steps � " + repeatText(q.repeat) })),
+  card.append(el("div", { className: "top" }, el("strong", { textContent: q.name || q.id }), el("small", { textContent: q.steps.length + " steps · " + repeatText(q.repeat) })),
     el("p", { className: "desc", textContent: q.steps.map((s, i) => (i + 1) + ". " + describeStep(s)).join("  ") }),
     el("small", { className: "live", textContent: "" }));
   const bar = el("div", { className: "rbar" });
@@ -553,7 +553,7 @@ $("aseqform").addEventListener("submit", async (e) => {
 function timerCard(t) {
   const card = el("div", { className: "card rule" });
   card.dataset.timer = t.id;
-  card.append(el("div", { className: "top" }, el("strong", { textContent: t.name || t.id }), el("small", { textContent: aMmss(t.duration_s) + (t.repeat ? " � repeats" : "") })),
+  card.append(el("div", { className: "top" }, el("strong", { textContent: t.name || t.id }), el("small", { textContent: aMmss(t.duration_s) + (t.repeat ? " · repeats" : "") })),
     el("small", { className: "live", textContent: "" }));
   const bar = el("div", { className: "rbar" });
   const btn = (txt, ctl, fn) => { const b = el("button", { type: "button", textContent: txt }); if (ctl) b.dataset.ctl = ctl; b.onclick = fn; bar.append(b); };

@@ -27,16 +27,16 @@
       $("grstnote").className = d.fault_reset ? "warn" : "";
       $("gloop").textContent = d.loop_max_ms + " ms";
       $("gheap").textContent = fmtBytes(d.heap.free) + " free";
-      $("gheap2").textContent = "lowest " + fmtBytes(d.heap.min_free) + " · largest block " + fmtBytes(d.heap.max_block) + " · fragmentation " + d.heap.fragmentation_pct + " %";
+      $("gheap2").textContent = "lowest " + fmtBytes(d.heap.min_free) + " Â· largest block " + fmtBytes(d.heap.max_block) + " Â· fragmentation " + d.heap.fragmentation_pct + " %";
       $("gfs").textContent = fmtBytes(d.filesystem.used) + " of " + fmtBytes(d.filesystem.total);
       $("gws").textContent = d.ws_clients;
       fill("gdev", d.devices.map((v) => [v.id, v.type, v.enabled ? "enabled" : "disabled",
-        v.failsafe_s ? v.failsafe_s + " s" + (v.tripped ? " · TRIPPED" : "") : "off", v.errors === undefined ? "" : v.errors + (v.ok ? "" : " · no reading")]));
-      list("gevents", d.events.map((e) => el("li", null, el("span", { className: "k" + (BAD.includes(e.kind) ? " bad" : ""), textContent: e.kind }), when(e) + " · " + e.text)), "Nothing yet.");
+        v.failsafe_s ? v.failsafe_s + " s" + (v.tripped ? " Â· TRIPPED" : "") : "off", v.errors === undefined ? "" : v.errors + (v.ok ? "" : " Â· no reading")]));
+      list("gevents", d.events.map((e) => el("li", null, el("span", { className: "k" + (BAD.includes(e.kind) ? " bad" : ""), textContent: e.kind }), when(e) + " Â· " + e.text)), "Nothing yet.");
     } catch (e) { /* the offline dot shows it */ }
     try {
       const a = await api("/automation/status");
-      list("gauto", a.events.slice(0, 8).map((e) => el("li", { textContent: e.ago_s + " s ago · " + e.rule + " · " + e.kind + (e.text ? " · " + e.text : "") })), "Nothing yet.");
+      list("gauto", a.events.slice(0, 8).map((e) => el("li", { textContent: e.ago_s + " s ago Â· " + e.rule + " Â· " + e.kind + (e.text ? " Â· " + e.text : "") })), "Nothing yet.");
     } catch (e) { /* automation not reachable */ }
     try {
       const g = await api("/gpio");
