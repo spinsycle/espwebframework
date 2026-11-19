@@ -9,10 +9,10 @@ answering is part of the result. Re-signs in on 401 (sessions end after 1 h idle
 Stdlib only. Keep every browser tab closed or visible-and-open on purpose: a hidden page sends no
 heartbeat, so any device with a failsafe will trip.
 """
-import argparse, csv, http.client, json, sys, time
+import argparse, csv, http.client, json, subprocess, sys, time
 
 FIELDS = ["t_s", "uptime_s", "heap_free", "heap_max_block", "heap_min_free", "frag_pct", "loop_max_ms",
-          "ws_clients", "devices", "tripped", "events_total", "reset_reason", "wd", "fault", "errors"]
+          "ws_clients", "devices", "tripped", "events_total", "reset_reason", "wd", "fault", "ping_ok", "errors"]
 
 
 class Board:
@@ -55,12 +55,18 @@ class Board:
         return json.loads(raw)  # a cut-off reply raises here
 
 
+def ping(ip):
+    flag = "-n" if sys.platform == "win32" else "-c"
+    r = subprocess.run(["ping", flag, "1", ip], capture_output=True, text=True)
+    return int(r.returncode == 0 and "TTL=" in r.stdout.upper() or r.returncode == 0 and sys.platform != "win32")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ip", required=True)
     ap.add_argument("--password", required=True)
     ap.add_argument("--hours", type=float, default=24)
-    ap.add_argument("--every", type=float, default=5, help="seconds between passes")
+    ap.add_argument("--every", type=float, default=20, help="seconds between passes")
     ap.add_argument("--out", default="soak.csv")
     ap.add_argument("--timeout", type=float, default=20)
     a = ap.parse_args()
@@ -76,15 +82,15 @@ def main():
             row = dict.fromkeys(FIELDS, "")
             row["t_s"] = int(time.time() - t0)
             pass_err = 0
+            row["ping_ok"] = ping(a.ip)  # separates "the board is down" from "the PC or Wi-Fi is"
             try:
-                st = b.get("/status")
-                dv = b.get("/devices")
+                # one request a pass: /diagnostics has everything (the ESP8266 refuses new connections after a burst)
                 dg = b.get("/diagnostics")
                 h = dg["heap"]
                 row.update(uptime_s=dg["uptime_s"], heap_free=h["free"], heap_max_block=h["max_block"],
                            heap_min_free=h["min_free"], frag_pct=h["fragmentation_pct"],
                            loop_max_ms=dg["loop_max_ms"], ws_clients=dg["ws_clients"],
-                           devices=len(dv.get("devices", [])), events_total=dg["events_total"],
+                           devices=len(dg.get("devices", [])), events_total=dg["events_total"],
                            reset_reason=dg["reset_reason"], wd=int(dg["watchdog_reset"]),
                            fault=int(dg["fault_reset"]))
                 row["tripped"] = sum(1 for d in dg.get("devices", []) if d.get("tripped"))
