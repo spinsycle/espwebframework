@@ -3,6 +3,8 @@
 ## v1.0.0
 First stable release: the full spec on the ESP8266 NodeMCU (every phase P0-P8b passed its hardware checklist), the ESP32 build compiling and passing the native tests with its hardware checklists still open. From here the `/api/v1` surface, the `schema_version` 1 config format, device type and model names and error codes are frozen (`tools/check_frozen.py`): additions only. See `docs/SAFETY.md` for the known limits.
 
+Soak result, stated plainly: two 24 hour runs on the NodeMCU. The heap stayed flat (no leak, no watchdog or fault reset, lowest low-water mark 6.4 KB on the second run, with a gentler poller). Neither run was clean: the board was reset from outside three times each run (reset reason `External System`, in the afternoon; cause not pinned down, suspected USB power) and it stopped accepting new HTTP connections for minutes at a time while still answering ping, recovering by itself. v1.0 is tagged with those open. The install-guide dry run (checklist Part B) has not been done yet.
+
 ## P9b (docs and examples)
 - Docs: `docs/API.md` (every route and WebSocket message), `DRIVERS.md` (every device type and how to add one), `CONFIG.md` (the config files and the automation JSON), `INSTALL.md` (PlatformIO, flashing, first sign-in), `SAFETY.md` (what the software does not protect and the known limits). README rewritten.
 - `examples/relay_controller`: a complete app (one `main.cpp`) built by the gate-style build; the framework comes in as a library.
