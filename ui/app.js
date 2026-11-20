@@ -379,12 +379,20 @@ $("i2cscan").onclick = async () => {
 // ---- network
 const F = () => $("netform").elements;
 function syncStatic() { $("staticbox").hidden = !F().sta_static.checked; }
+function syncMdns() {
+  const f = F();
+  $("mdnsbox").hidden = !f.mdns_enabled.checked;
+  $("mdnsprev").textContent = f.mdns_name.value ? "Reach this board at http://" + f.mdns_name.value + ".local (needs Wi-Fi client mode)" : "";
+}
 
 async function loadNet() {
   const c = await api("/network");
   const f = F();
   f.mode.value = c.mode;
   f.hostname.value = c.hostname;
+  f.mdns_enabled.checked = c.mdns.enabled;
+  f.mdns_name.value = c.mdns.name;
+  syncMdns();
   f.ap_ssid.value = c.ap.ssid;
   f.ap_channel.value = c.ap.channel;
   f.ap_ip.value = c.ap.ip;
@@ -409,6 +417,8 @@ $("netform").querySelectorAll("input[type=password]").forEach((inp) => {
 });
 
 $("netform").elements.sta_static.addEventListener("change", syncStatic);
+$("netform").elements.mdns_enabled.addEventListener("change", syncMdns);
+$("netform").elements.mdns_name.addEventListener("input", syncMdns);
 $("netform").addEventListener("submit", async (e) => {
   e.preventDefault();
   const f = F(), msg = $("netmsg");
@@ -418,7 +428,7 @@ $("netform").addEventListener("submit", async (e) => {
   if (f.sta_password.value) sta.password = f.sta_password.value;
   msg.className = "";
   try {
-    await api("/network", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: f.mode.value, hostname: f.hostname.value, ap, sta }) });
+    await api("/network", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: f.mode.value, hostname: f.hostname.value, mdns: { enabled: f.mdns_enabled.checked, name: f.mdns_name.value }, ap, sta }) });
     msg.textContent = "Applied. The device is switching networks; reconnect to it and reopen this page.";
   } catch (err) {
     msg.className = "err";

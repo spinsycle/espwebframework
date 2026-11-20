@@ -4,7 +4,7 @@ All settings live as JSON under `/config/` on LittleFS. Every file has `"schema_
 
 | File | Holds | In `config/export`? |
 |---|---|---|
-| `network.json` | mode, hostname, AP and STA settings, Wi-Fi passwords | no |
+| `network.json` | mode, hostname, mDNS (`enabled`, `name`), AP and STA settings, Wi-Fi passwords | no |
 | `devices.json` | the device list | yes |
 | `dashboard.json` | dashboard layout | no |
 | `automation.json` | settings, rules, sequences, timers | no |

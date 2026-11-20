@@ -3,7 +3,9 @@
 #include <Arduino.h>
 #if defined(ESP8266)
 #include <ESP8266WiFi.h>
+#include <ESP8266mDNS.h>
 #else
+#include <ESPmDNS.h>
 #include <WiFi.h>
 #endif
 
@@ -28,6 +30,7 @@ void NetworkManager::begin(const NetworkConfig& cfg) {
 void NetworkManager::apply() {
   recoveryAp_ = false;
   staLostSince_ = 0;
+  mdnsTick(false);  // drop the responder before the radio restarts; loop() brings it back up
   WiFi.disconnect(true);
   WiFi.softAPdisconnect(true);
 
@@ -74,6 +77,24 @@ NetCfgError NetworkManager::requestApply(const NetworkConfig& cfg) {
 
 bool NetworkManager::staConnected() const { return WiFi.status() == WL_CONNECTED; }
 
+void NetworkManager::mdnsTick(bool staUp) {
+  bool want = staUp && cfg_.mdnsEnabled && wantsSta();
+  if (want && !mdnsUp_) {
+    if (MDNS.begin(cfg_.mdnsName)) {
+      MDNS.addService("http", "tcp", 80);
+      mdnsUp_ = true;
+      Serial.printf("[net] mDNS up: %s.local\n", cfg_.mdnsName);
+    }  // else: retried on the next loop() pass
+  } else if (!want && mdnsUp_) {
+    MDNS.end();
+    mdnsUp_ = false;
+    Serial.println("[net] mDNS down");
+  }
+#if defined(ESP8266)
+  if (mdnsUp_) MDNS.update();
+#endif
+}
+
 void NetworkManager::loop() {
   uint32_t now = millis();
 
@@ -94,6 +115,7 @@ void NetworkManager::loop() {
     lastConn_ = conn;
     Serial.printf("[net] %lu station %s\n", (unsigned long)now, conn ? "connected" : "disconnected");
   }
+  mdnsTick(conn);
   if (conn) {
     staLostSince_ = 0;
     if (recoveryAp_ && cfg_.mode == NetMode::STA) {  // link is back: drop the recovery AP
@@ -123,6 +145,14 @@ void NetworkManager::status(JsonObject out) const {
   out["hostname"] = cfg_.hostname;
   out["mac"] = WiFi.macAddress();
   out["recovery_ap"] = recoveryAp_;
+  JsonObject md = out["mdns"].to<JsonObject>();
+  md["enabled"] = cfg_.mdnsEnabled;
+  md["active"] = mdnsUp_;
+  if (mdnsUp_) {
+    char n[sizeof cfg_.mdnsName + 6];
+    snprintf(n, sizeof n, "%s.local", cfg_.mdnsName);
+    md["name"] = n;
+  }
   bool apUp = cfg_.mode != NetMode::STA || recoveryAp_;
   JsonObject ap = out["ap"].to<JsonObject>();
   ap["active"] = apUp;

@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+mDNS (F1 of the v1.1 plan). Additive: `network.json` gains `mdns.enabled` (default off) and `mdns.name`; old files load unchanged, schema stays 1, no route or error-code change.
+- Network tab: "Name on your network (mDNS)" checkbox and name; `relays` -> `http://relays.local`. Runs only with the Wi-Fi client connected; off means no responder and nothing else changes.
+- `GET /status` reports `network.mdns`.
+
 Four demo apps and a seed mechanism. Tooling and examples only; no API, config, device or firmware change.
 - `tools/build_ui.py`: an app's `seed/{devices,automation,dashboard}.json` ship in the filesystem image as `/config/*.json`, so a fresh `uploadfs` boots with the app's devices and rules. The build fails on invalid JSON or a `schema_version` other than 1; the firmware still validates entries at boot (a bad entry is skipped).
 - `examples/`: `relay_controller` (seeded), `light_sequencer`, `thermostat`, `pan_tilt_rover`, each with a README and wiring table.

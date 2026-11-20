@@ -63,11 +63,13 @@ struct NetworkConfig {
   uint8_t staIp[4] = {0, 0, 0, 0};
   uint8_t staGateway[4] = {0, 0, 0, 0};
   uint8_t staMask[4] = {255, 255, 255, 0};
+  bool mdnsEnabled = false;            // off = no responder; the board is reached by IP only
+  char mdnsName[kHostCap] = {0};       // "relays" -> relays.local
 };
 
 enum class NetCfgError : uint8_t {
   Ok = 0, Mode, Hostname, ApSsid, ApPass, ApChannel, ApIp,
-  StaSsid, StaPass, StaIp, StaGateway, StaMask, Format
+  StaSsid, StaPass, StaIp, StaGateway, StaMask, Format, MdnsName
 };
 
 inline const char* netCfgErrorField(NetCfgError e) {
@@ -84,6 +86,7 @@ inline const char* netCfgErrorField(NetCfgError e) {
     case NetCfgError::StaIp: return "sta.ip";
     case NetCfgError::StaGateway: return "sta.gateway";
     case NetCfgError::StaMask: return "sta.mask";
+    case NetCfgError::MdnsName: return "mdns.name";
     default: return "format";
   }
 }
@@ -128,6 +131,9 @@ inline NetCfgError validateNetworkConfig(const NetworkConfig& c) {
   using namespace detail;
   if (uint8_t(c.mode) > uint8_t(NetMode::AP_STA)) return NetCfgError::Mode;
   if (!terminated(c.hostname, kHostCap) || !validHostname(c.hostname)) return NetCfgError::Hostname;
+  // A stored name is always checked; an empty one is only allowed while mDNS is off.
+  if (!terminated(c.mdnsName, kHostCap)) return NetCfgError::MdnsName;
+  if ((c.mdnsEnabled || c.mdnsName[0]) && !validHostname(c.mdnsName)) return NetCfgError::MdnsName;
   // The AP block is always valid: it doubles as the recovery access point.
   if (!terminated(c.apSsid, kSsidCap) || strlen(c.apSsid) < 1) return NetCfgError::ApSsid;
   if (!terminated(c.apPass, kPassCap) || !validPass(c.apPass, false)) return NetCfgError::ApPass;

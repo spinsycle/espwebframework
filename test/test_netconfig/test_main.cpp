@@ -86,6 +86,27 @@ void test_hostname() {
   TEST_ASSERT_EQUAL(int(NetCfgError::Ok), int(validateNetworkConfig(c)));
 }
 
+void test_mdns_rules() {
+  NetworkConfig c = defaults();
+  TEST_ASSERT_FALSE(c.mdnsEnabled);                       // off by default
+  TEST_ASSERT_EQUAL(int(NetCfgError::Ok), int(validateNetworkConfig(c)));
+  c.mdnsEnabled = true;                                   // enabled needs a name
+  TEST_ASSERT_EQUAL(int(NetCfgError::MdnsName), int(validateNetworkConfig(c)));
+  strcpy(c.mdnsName, "relays");
+  TEST_ASSERT_EQUAL(int(NetCfgError::Ok), int(validateNetworkConfig(c)));
+  strcpy(c.mdnsName, "re lays");
+  TEST_ASSERT_EQUAL(int(NetCfgError::MdnsName), int(validateNetworkConfig(c)));
+  strcpy(c.mdnsName, "relays.local");                     // dots are not allowed in the label
+  TEST_ASSERT_EQUAL(int(NetCfgError::MdnsName), int(validateNetworkConfig(c)));
+  c.mdnsEnabled = false;                                  // a bad stored name is rejected even when off
+  TEST_ASSERT_EQUAL(int(NetCfgError::MdnsName), int(validateNetworkConfig(c)));
+  c.mdnsName[0] = 0;
+  TEST_ASSERT_EQUAL(int(NetCfgError::Ok), int(validateNetworkConfig(c)));
+  memset(c.mdnsName, 'a', sizeof c.mdnsName);             // no NUL
+  TEST_ASSERT_EQUAL(int(NetCfgError::MdnsName), int(validateNetworkConfig(c)));
+  TEST_ASSERT_EQUAL_STRING("mdns.name", netCfgErrorField(NetCfgError::MdnsName));
+}
+
 void test_unterminated_string_rejected() {
   NetworkConfig c = defaults();
   memset(c.apSsid, 'a', sizeof c.apSsid);  // no NUL
@@ -120,6 +141,7 @@ int main() {
   RUN_TEST(test_channel_and_ap_ip);
   RUN_TEST(test_static_ip_rules);
   RUN_TEST(test_hostname);
+  RUN_TEST(test_mdns_rules);
   RUN_TEST(test_unterminated_string_rejected);
   RUN_TEST(test_parse_ipv4);
   RUN_TEST(test_parse_mode);

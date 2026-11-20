@@ -37,7 +37,7 @@ Good to know:
 - Five wrong passwords in a row lock sign-in for a short time; the page shows how many seconds.
 - Changing the password signs every other browser out.
 
-**Next step: join your home Wi-Fi.** Open the **Network** tab (section 6), enter your Wi-Fi name and password, choose mode **Both**, and save. The board's own network stays as a way back in. Its address on your network appears on the Dashboard under **Wi-Fi client**, and the board also answers to its hostname (`espwf-` plus six characters).
+**Next step: join your home Wi-Fi.** Open the **Network** tab (section 6), enter your Wi-Fi name and password, choose mode **Both**, and save. The board's own network stays as a way back in. Its address on your network appears on the Dashboard under **Wi-Fi client**, and the board also answers to its hostname (`espwf-` plus six characters). To get a friendly address, tick **Name on your network (mDNS)** on the Network tab and give it a name such as `relays`; the page is then at `http://relays.local` while the board is on your Wi-Fi. Leave it off and nothing changes: the board is reached by its IP address.
 
 ## 2. The page at a glance
 

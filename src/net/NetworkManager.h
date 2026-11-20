@@ -25,6 +25,7 @@ class NetworkManager {
 
  private:
   void apply();
+  void mdnsTick(bool staUp);  // starts/stops the .local responder to match config + link
   bool wantsSta() const { return cfg_.mode != NetMode::AP; }
 
   NetworkConfig cfg_;
@@ -34,6 +35,7 @@ class NetworkManager {
   uint32_t staLostSince_ = 0;
   bool recoveryAp_ = false;
   bool lastConn_ = false;
+  bool mdnsUp_ = false;
   bool staticApplied_ = false;  // a static IP was set since boot, so DHCP must be restored explicitly
 };
 

@@ -251,6 +251,14 @@
       </label>
       <label>Hostname <input name="hostname" maxlength="32"></label>
       <fieldset>
+        <legend>Name on your network (mDNS)</legend>
+        <label class="row"><input name="mdns_enabled" type="checkbox"> Answer to a .local name</label>
+        <div id="mdnsbox">
+          <label>Name <input name="mdns_name" maxlength="32" placeholder="relays"></label>
+          <p id="mdnsprev" class="hint"></p>
+        </div>
+      </fieldset>
+      <fieldset>
         <legend>Access point</legend>
         <label>SSID <input name="ap_ssid" maxlength="32"></label>
         <label>Password <input name="ap_password" type="password" maxlength="63" placeholder="unchanged"></label>

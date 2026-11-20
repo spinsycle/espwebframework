@@ -41,11 +41,14 @@ Scripts send `Authorization: Bearer <token>`. At most 3 sessions; idle sessions 
 
 ```json
 {"mode":"ap_sta","hostname":"espwf-550517",
+ "mdns":{"enabled":true,"name":"relays"},
  "ap":{"ssid":"ESPWF-550517","password":"min8chars","channel":1,"ip":"192.168.73.1"},
  "sta":{"ssid":"Home","password":"...","static":false,"ip":"","gateway":"","mask":""}}
 ```
 
-`mode` is `ap`, `sta` or `ap_sta`. Reply `{"ok":true,"apply_in_ms":...}`: the change applies after the reply goes out. Errors: `400 invalid_network_config` with `field` (`mode`, `hostname`, `ap.ssid`, `ap.password`, `ap.channel`, `ap.ip`, `sta.*`, `format`). A bad AP password change can lock you out: after `uploadfs` the board is back at the factory settings.
+`mdns.enabled` (default `false`) turns on a `.local` name: with `name` `relays` the page is at `http://relays.local`. It runs only while the Wi-Fi client is connected (not in `ap` mode), and the IP address is never changed by it. `name` is 1-32 letters, digits or `-`, and required while enabled. `GET /status` shows `network.mdns` (`enabled`, `active`, and `name` as `relays.local` once active).
+
+`mode` is `ap`, `sta` or `ap_sta`. Reply `{"ok":true,"apply_in_ms":...}`: the change applies after the reply goes out. Errors: `400 invalid_network_config` with `field` (`mode`, `hostname`, `mdns.name`, `ap.ssid`, `ap.password`, `ap.channel`, `ap.ip`, `sta.*`, `format`). A bad AP password change can lock you out: after `uploadfs` the board is back at the factory settings.
 
 ## Devices
 

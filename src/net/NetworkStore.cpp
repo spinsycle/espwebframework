@@ -39,6 +39,14 @@ NetCfgError applyJson(JsonVariantConst src, NetworkConfig& cfg) {
   bad = false; setStr(src["hostname"], cfg.hostname, kHostCap, bad);
   if (bad) return NetCfgError::Hostname;
 
+  JsonVariantConst md = src["mdns"];
+  if (!md["enabled"].isNull()) {
+    if (!md["enabled"].is<bool>()) return NetCfgError::Format;
+    cfg.mdnsEnabled = md["enabled"].as<bool>();
+  }
+  bad = false; setStr(md["name"], cfg.mdnsName, kHostCap, bad);
+  if (bad) return NetCfgError::MdnsName;
+
   JsonVariantConst ap = src["ap"];
   bad = false; setStr(ap["ssid"], cfg.apSsid, kSsidCap, bad);
   if (bad) return NetCfgError::ApSsid;
@@ -80,6 +88,9 @@ void toJson(const NetworkConfig& c, JsonObject out, bool includeSecrets) {
   out["schema_version"] = 1;
   out["mode"] = netModeName(c.mode);
   out["hostname"] = c.hostname;
+  JsonObject md = out["mdns"].to<JsonObject>();
+  md["enabled"] = c.mdnsEnabled;
+  md["name"] = c.mdnsName;
   JsonObject ap = out["ap"].to<JsonObject>();
   ap["ssid"] = c.apSsid;
   ap["channel"] = c.apChannel;
