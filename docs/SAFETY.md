@@ -19,6 +19,7 @@
 - Timers and running sequences are not restored after a restart.
 - A lost password is recovered by re-flashing the filesystem (`uploadfs`, which also wipes every setting) or a factory reset from a signed-in page.
 - The ESP8266 has about 15 KB of free heap and refuses new connections for roughly two minutes after a burst of hundreds. Normal use (a few browser tabs, a script polling every few seconds) is fine; a stress script is not.
+- Over a 24 hour soak with one request every 20 s the board stayed up and its heap stayed flat, but it stopped accepting new connections for minutes at a time on several occasions (it answered ping, not HTTP) and recovered by itself. Treat HTTP as best-effort on the ESP8266: a client should retry, and nothing safety-relevant may depend on a request getting through (that is what failsafes are for). Twice in two runs the board also reset from outside (reset reason `External System`, not the watchdog) in the afternoon; power it from a wall adapter rather than a PC USB port for anything long-running.
 - Manual pin testing is deliberately absent: there is no endpoint that drives a raw pin. `GET /gpio` is read only.
 - The watchdog test works on the ESP8266 only.
 - Verified on ESP8266 NodeMCU hardware. The ESP32 build compiles and passes the native tests, but its hardware checklists have not been run.
