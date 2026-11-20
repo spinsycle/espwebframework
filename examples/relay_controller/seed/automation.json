@@ -1,0 +1,18 @@
+{"schema_version":1,"enabled":true,"utc_offset_min":0,"interlocks":[],
+ "rules":[
+  {"id":"btn_toggle","name":"Button toggles lamp","enabled":true,
+   "trigger":{"type":"change","device":"btn","property":"state"},
+   "match":"all",
+   "conditions":[{"device":"btn","property":"state","operator":"==","value":1,"for_s":0}],
+   "actions":[{"type":"toggle","device":"lamp"}],
+   "cooldown_s":1},
+  {"id":"evening_on","name":"Lamp on at 18:00","enabled":true,
+   "trigger":{"type":"schedule","time":"18:00","days":[0,1,2,3,4,5,6]},
+   "match":"all","conditions":[],
+   "actions":[{"type":"on","device":"lamp"}],"cooldown_s":0},
+  {"id":"night_off","name":"Lamp off at 23:00","enabled":true,
+   "trigger":{"type":"schedule","time":"23:00","days":[0,1,2,3,4,5,6]},
+   "match":"all","conditions":[],
+   "actions":[{"type":"off","device":"lamp"}],"cooldown_s":0}
+ ],
+ "sequences":[],"timers":[]}

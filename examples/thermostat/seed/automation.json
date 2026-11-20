@@ -1,0 +1,16 @@
+{"schema_version":1,"enabled":true,"utc_offset_min":0,"interlocks":[],
+ "rules":[
+  {"id":"too_cold","name":"Heat on below 20 C","enabled":true,
+   "trigger":{"type":"when"},"match":"all",
+   "conditions":[{"device":"temp","property":"temp_c","operator":"<","value":20,"for_s":30}],
+   "actions":[{"type":"on","device":"heater"}],"cooldown_s":0},
+  {"id":"warm_enough","name":"Heat off above 22 C","enabled":true,
+   "trigger":{"type":"when"},"match":"all",
+   "conditions":[{"device":"temp","property":"temp_c","operator":">","value":22,"for_s":30}],
+   "actions":[{"type":"off","device":"heater"}],"cooldown_s":0},
+  {"id":"sensor_lost","name":"Heat off if sensor fails","enabled":true,
+   "trigger":{"type":"when"},"match":"all",
+   "conditions":[{"device":"temp","property":"ok","operator":"==","value":0,"for_s":60}],
+   "actions":[{"type":"off","device":"heater"},{"type":"event","text":"sensor lost"}],"cooldown_s":0}
+ ],
+ "sequences":[],"timers":[]}

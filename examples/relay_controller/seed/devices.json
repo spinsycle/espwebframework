@@ -1,0 +1,4 @@
+{"schema_version":1,"devices":[
+ {"id":"lamp","name":"Lamp relay","type":"relay","pin":13,"invert":true,"initial":0,"failsafe_s":0},
+ {"id":"btn","name":"Button","type":"input","pin":14,"pullup":true,"invert":true,"debounce_ms":30,"long_ms":0}
+]}

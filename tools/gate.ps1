@@ -16,5 +16,18 @@ foreach ($s in $steps) {
   & python -m platformio @($s[1])
   if ($LASTEXITCODE -ne 0) { Write-Host "GATE FAIL: $($s[0])"; exit 1 }
 }
+$root = Get-Location
+foreach ($app in Get-ChildItem examples -Directory | Where-Object { (Test-Path (Join-Path $_.FullName 'platformio.ini')) -and ($_.Name -ne 'smoke') }) {
+  foreach ($e in 'nodemcuv2','esp32dev') {
+    foreach ($t in @(@(), @('-t','buildfs'))) {
+      Write-Host "== example $($app.Name) $e $($t -join ' ')"
+      Set-Location $app.FullName
+      & python -m platformio run -e $e @t
+      $rc = $LASTEXITCODE
+      Set-Location $root
+      if ($rc -ne 0) { Write-Host "GATE FAIL: example $($app.Name) $e"; exit 1 }
+    }
+  }
+}
 Write-Host 'GATE OK'
 exit 0

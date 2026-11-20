@@ -38,4 +38,23 @@ if os.path.isdir(src):
         # mtime=0 keeps the image reproducible
         with open(os.path.join(www, name + ".gz"), "wb") as f:
             f.write(gzip.compress(raw, 9, mtime=0))
+    # Optional app seed: <app>/seed/{devices,automation,dashboard}.json ship as /config/*.json so a fresh `uploadfs`
+    # boots with the app's devices, rules and dashboard already in place. The firmware still validates them at boot
+    # (bad device entries are skipped); here we only refuse unparseable JSON or a wrong schema_version.
+    seed = os.path.join(project, "seed")
+    if os.path.isdir(seed):
+        import json
+        cfg = os.path.join(out, "config")
+        os.makedirs(cfg)
+        for name in sorted(os.listdir(seed)):
+            if name not in ("devices.json", "automation.json", "dashboard.json"):
+                raise SystemExit("build_ui: seed/%s is not one of devices.json, automation.json, dashboard.json" % name)
+            with open(os.path.join(seed, name), encoding="utf-8") as f:
+                try:
+                    doc = json.load(f)
+                except ValueError as e:
+                    raise SystemExit("build_ui: seed/%s is not valid JSON: %s" % (name, e))
+            if doc.get("schema_version") != 1:
+                raise SystemExit("build_ui: seed/%s needs \"schema_version\": 1" % name)
+            shutil.copyfile(os.path.join(seed, name), os.path.join(cfg, name))
     env.Replace(PROJECT_DATA_DIR=out)

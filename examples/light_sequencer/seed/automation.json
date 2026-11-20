@@ -1,0 +1,17 @@
+{"schema_version":1,"enabled":true,"utc_offset_min":0,"interlocks":[],
+ "rules":[
+  {"id":"boot_show","name":"Start show at boot","enabled":true,
+   "trigger":{"type":"startup"},"match":"all","conditions":[],
+   "actions":[{"type":"seq_start","device":"show"}],"cooldown_s":0},
+  {"id":"nap_end","name":"Lamp off when timer ends","enabled":true,
+   "trigger":{"type":"timer","device":"nap","event":"done"},"match":"all","conditions":[],
+   "actions":[{"type":"off","device":"lamp"}],"cooldown_s":0}
+ ],
+ "sequences":[{"id":"show","name":"Light show","repeat":0,"steps":[
+   {"type":"do","action":{"type":"set","device":"led","value":100}},
+   {"type":"wait","seconds":2},
+   {"type":"do","action":{"type":"set","device":"led","value":25}},
+   {"type":"wait","seconds":2},
+   {"type":"do","action":{"type":"set","device":"led","value":0}},
+   {"type":"wait","seconds":4}]}],
+ "timers":[{"id":"nap","name":"Lamp nap","duration_s":60,"repeat":false}]}

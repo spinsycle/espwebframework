@@ -1,0 +1,5 @@
+{"schema_version":1,"devices":[
+ {"id":"drive","name":"Drive motor","type":"motor","pin":12,"pin2":13,"pin3":-1,"freq_hz":1000,"failsafe_s":3},
+ {"id":"pan","name":"Pan","type":"servo","model":"pca9685","i2c_addr":64,"channel":0,"min_us":500,"max_us":2400,"initial":90,"safe_angle":90,"failsafe_s":10},
+ {"id":"tilt","name":"Tilt","type":"servo","model":"pca9685","i2c_addr":64,"channel":1,"min_us":500,"max_us":2400,"initial":90,"safe_angle":90,"failsafe_s":10}
+]}

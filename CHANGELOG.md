@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+Four demo apps and a seed mechanism. Tooling and examples only; no API, config, device or firmware change.
+- `tools/build_ui.py`: an app's `seed/{devices,automation,dashboard}.json` ship in the filesystem image as `/config/*.json`, so a fresh `uploadfs` boots with the app's devices and rules. The build fails on invalid JSON or a `schema_version` other than 1; the firmware still validates entries at boot (a bad entry is skipped).
+- `examples/`: `relay_controller` (seeded), `light_sequencer`, `thermostat`, `pan_tilt_rover`, each with a README and wiring table.
+- `tools/gate.ps1` builds every example for both chips and builds their filesystem images.
+
 ## v1.0.1
 Dashboard fixes and a user guide. Only the Devices tab and the Automation tab text change; no API, config, device or firmware behaviour change.
 - Devices tab: only the first device card had disable, edit and remove (`devices.map(devCard)` passed the index as the `bare` flag). All cards have them now.

@@ -1,0 +1,4 @@
+{"schema_version":1,"devices":[
+ {"id":"heater","name":"Heater relay","type":"relay","pin":13,"invert":true,"initial":0,"failsafe_s":0},
+ {"id":"temp","name":"Room temp","type":"sensor","model":"ds18b20","pin":14,"interval_s":5}
+]}

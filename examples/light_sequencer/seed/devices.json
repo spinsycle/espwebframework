@@ -1,0 +1,4 @@
+{"schema_version":1,"devices":[
+ {"id":"lamp","name":"Lamp relay","type":"relay","pin":13,"invert":true,"initial":0,"failsafe_s":0},
+ {"id":"led","name":"LED","type":"pwm","pin":12,"freq_hz":1000,"initial":0,"invert":false}
+]}

@@ -13,7 +13,10 @@ my-app/
   platformio.ini
   src/main.cpp
   tools/build_ui.py      <- copy from the framework repo
+  seed/                  <- optional: devices.json, automation.json, dashboard.json
 ```
+
+`seed/` files ship as `/config/*.json` with `uploadfs`, so the app boots with its devices and rules already set (each needs `"schema_version": 1`; the build fails otherwise). Working examples: [`light_sequencer`](../examples/light_sequencer), [`thermostat`](../examples/thermostat), [`pan_tilt_rover`](../examples/pan_tilt_rover), [`relay_controller`](../examples/relay_controller). Seeds are not re-applied by a plain `upload`.
 
 `platformio.ini` (start from [`examples/relay_controller`](../examples/relay_controller/platformio.ini)):
 
