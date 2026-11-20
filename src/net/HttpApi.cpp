@@ -16,6 +16,8 @@
 #include "devices/CommandJson.h"
 #include "devices/DeviceRegistry.h"
 #include "devices/DeviceStore.h"
+#include "net/MqttManager.h"
+#include "net/MqttStore.h"
 #include "net/NetworkStore.h"
 #include "core/EventLog.h"
 #include "devices/PinInfo.h"
@@ -73,8 +75,10 @@ static int statusFor(AutoErr e) {
 
 static void sendAutoErr(AsyncWebServerRequest* r, AutoErr e) { sendError(r, statusFor(e), autoErrCode(e), autoErrField(e)); }
 
-void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry& devices, WsHub& ws, AutomationEngine& automation, AuthManager& auth) {
+void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry& devices, WsHub& ws, AutomationEngine& automation, AuthManager& auth,
+                    MqttManager& mqtt) {
   server_ = new AsyncWebServer(80);
+  MqttManager* mq = &mqtt;
   ws.attach(*server_, fw, devices, auth);  // before the static-file handler, which would otherwise answer /ws
   FrameworkController* f = &fw;
   NetworkManager* n = &net;
@@ -231,6 +235,27 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry
   put->setMethod(HTTP_PUT);
   put->setMaxContentLength(1024);
   server_->addHandler(put);
+
+  // ---- MQTT. The password is never returned (password_set); a PUT without one keeps the stored one.
+  server_->on("/api/v1/mqtt", HTTP_GET, [mq](AsyncWebServerRequest* r) {
+    JsonDocument d;
+    MqttStore::toJson(mq->config(), d.to<JsonObject>(), false);
+    mq->status(d["status"].to<JsonObject>());
+    sendJson(r, d);
+  });
+
+  auto* mput = new AsyncCallbackJsonWebHandler("/api/v1/mqtt", [mq](AsyncWebServerRequest* r, JsonVariant& json) {
+    MqttConfig c = mq->config();
+    MqttCfgError e = MqttStore::applyJson(json, c);
+    if (e == MqttCfgError::Ok) e = mq->requestApply(c);
+    if (e != MqttCfgError::Ok) { sendError(r, 400, "invalid_mqtt_config", mqttCfgErrorField(e)); return; }
+    JsonDocument d;
+    d["ok"] = true;
+    sendJson(r, d);
+  });
+  mput->setMethod(HTTP_PUT);
+  mput->setMaxContentLength(512);
+  server_->addHandler(mput);
 
   // ---- devices. Config changes and commands are queued (202); loop() applies them.
   server_->on("/api/v1/devices", HTTP_GET, [dv](AsyncWebServerRequest* r) {

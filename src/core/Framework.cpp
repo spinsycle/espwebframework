@@ -7,6 +7,7 @@
 #include <LittleFS.h>
 
 #include "config/ConfigRules.h"
+#include "net/MqttStore.h"
 #include "net/NetworkStore.h"
 
 using namespace espwf;
@@ -38,9 +39,13 @@ bool FrameworkController::begin() {
     Serial.println("[espwf] no valid network config, using defaults");
   }
   net_.begin(cfg);
+  MqttConfig mcfg;
+  setMqttDefaults(mcfg, cfg.hostname);
+  if (MqttStore::load(mcfg)) Serial.println("[espwf] mqtt config loaded");
+  mqtt_.begin(mcfg, devices_, net_);
   automation_.begin(devices_, net_);
   auth_.begin();
-  http_.begin(*this, net_, devices_, ws_, automation_, auth_);
+  http_.begin(*this, net_, devices_, ws_, automation_, auth_, mqtt_);
   Serial.printf("[espwf] ready, AP '%s'\n", cfg.apSsid);
   return true;
 }
@@ -81,6 +86,7 @@ void FrameworkController::loop() {
   if (devices_.restartRequested() && !restartPending_) restart();
   ws_.loop();
   net_.loop();
+  mqtt_.loop();
   if (restartPending_ && int32_t(millis() - restartAt_) >= 0) hal::restart();
 }
 
@@ -131,4 +137,5 @@ void FrameworkController::getStatus(JsonObject out) const {
   fs["total"] = hal::fsTotal();
   out["ws_clients"] = ws_.clientCount();
   net_.status(out["network"].to<JsonObject>());
+  mqtt_.status(out["mqtt"].to<JsonObject>());
 }

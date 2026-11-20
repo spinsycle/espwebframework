@@ -9,6 +9,7 @@
   "dependencies": [
     {"owner": "esp32async", "name": "ESPAsyncWebServer", "version": "3.12.1"},
     {"owner": "bblanchon", "name": "ArduinoJson", "version": "7.4.3"},
-    {"owner": "paulstoffregen", "name": "OneWire", "version": "2.3.8"}
+    {"owner": "paulstoffregen", "name": "OneWire", "version": "2.3.8"},
+    {"owner": "marvinroger", "name": "AsyncMqttClient", "version": "0.9.0"}
   ]
 }

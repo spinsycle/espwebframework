@@ -115,6 +115,7 @@ http error: bad_format
 http error: bad_id
 http error: busy
 http error: confirm_required
+http error: invalid_mqtt_config
 http error: invalid_network_config
 http error: locked
 http error: not_found
@@ -190,6 +191,7 @@ route: /api/v1/gpio
 route: /api/v1/heartbeat
 route: /api/v1/i2c
 route: /api/v1/i2c/scan
+route: /api/v1/mqtt
 route: /api/v1/network
 route: /api/v1/password
 route: /api/v1/session

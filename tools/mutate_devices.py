@@ -689,6 +689,54 @@ PININFO = [
     ("readable", "return checkPin(chip, gpio, PinRole::Input) == PinErr::Ok;", "return checkPin(chip, gpio, PinRole::Input) != PinErr::Invalid;"),
 ]
 
+MQTT = [
+    ("host needed when enabled", "if ((c.enabled || c.host[0]) && !validHost(c.host))", "if ((c.host[0]) && !validHost(c.host))"),
+    ("stored host checked when off", "if ((c.enabled || c.host[0]) && !validHost(c.host))", "if ((c.enabled) && !validHost(c.host))"),
+    ("host dot allowed", "|| c == '-' || c == '.';", "|| c == '-';"),
+    ("port zero", "if (c.port < 1) return MqttCfgError::Port;", "if (c.port < 0) return MqttCfgError::Port;"),
+    ("keepalive lower", "c.keepAlive < 5 ||", "c.keepAlive < 4 ||"),
+    ("keepalive upper", "c.keepAlive > 600)", "c.keepAlive > 601)"),
+    ("base leading slash", "|| b[0] == '/' || b[n - 1] == '/')", "|| b[n - 1] == '/')"),
+    ("base trailing slash", "|| b[0] == '/' || b[n - 1] == '/')", "|| b[0] == '/')"),
+    ("base doubled slash", "|| (c == '/' && b[i + 1] == '/')", ""),
+    ("base underscore", "|| c == '-' || c == '_' || c == '/';", "|| c == '-' || c == '/';"),
+    ("base empty", "if (n < 1 || n > 40 ||", "if (n > 40 ||"),
+    ("topic fit", "return n > 0 && size_t(n) < cap;", "return n > 0 && size_t(n) <= cap;"),
+    ("topic fit off", "return n > 0 && size_t(n) < cap;", "return n > 0;"),
+    ("set topic base end", "|| topic[bl] != '/') return false;", ") return false;"),
+    ("set topic suffix", "strcmp(slash, \"/set\") != 0", "strncmp(slash, \"/set\", 4) != 0"),
+    # "empty id" and "mdns name terminated" are equivalent mutants: validDeviceId / the strlen bound reject the same input
+    ("set topic id valid", "return detail::validDeviceId(idOut);", "return true;"),
+    ("cmd lowercase", "(c >= 'A' && c <= 'Z') ? char(c + 32) : c;", "(c >= 'A' && c <= 'E') ? char(c + 32) : c;"),
+    ("cmd relay one", "isOn = !strcmp(w, \"1\");", "isOn = !strcmp(w, \"2\");"),
+    ("cmd relay zero", "isOff = !strcmp(w, \"0\");", "isOff = !strcmp(w, \"2\");"),
+    ("cmd motor off", "(t == DeviceType::Motor && !strcmp(w, \"off\"))", "(false)"),
+    ("cmd pwm on", "out.value = isOn ? 100 : 0;", "out.value = isOn ? 99 : 0;"),
+    ("cmd finite", "|| !isfinite(v)", ""),
+    ("cmd full number", "|| *end != 0", ""),
+    ("backoff cap", "attempt > 4 ? 4 : attempt", "attempt > 3 ? 3 : attempt"),
+    ("backoff max", "return ms > 60000u ? 60000u : ms;", "return ms;"),
+    ("backoff base", "5000u <<", "4000u <<"),
+    ("sig rounding", "lroundf(temp * 10.0f)", "lroundf(temp)"),
+    ("sig on", "return a.on == b.on &&", "return true &&"),
+    ("sig ok", "a.ok == b.ok &&", "true &&"),
+    ("sig tripped", "a.tripped == b.tripped &&", "true &&"),
+    ("sig duty", "a.duty == b.duty &&", "true &&"),
+    ("sig val", "a.val == b.val &&", "true &&"),
+    ("sig edges", "a.edges == b.edges &&", "true &&"),
+    ("sig longs", "a.longs == b.longs &&", "true &&"),
+    ("sig temp", "a.t10 == b.t10 &&", "true &&"),
+    ("sig hum", "a.h10 == b.h10 &&", "true &&"),
+    ("sig press", "a.p10 == b.p10;", "true;"),
+]
+
+MDNS = [
+    ("mdns name needed when enabled", "if ((c.mdnsEnabled || c.mdnsName[0]) && !validHostname(c.mdnsName))", "if ((c.mdnsName[0]) && !validHostname(c.mdnsName))"),
+    ("mdns stored name checked when off", "if ((c.mdnsEnabled || c.mdnsName[0]) && !validHostname(c.mdnsName))", "if ((c.mdnsEnabled) && !validHostname(c.mdnsName))"),
+    ("mdns name rules", "if ((c.mdnsEnabled || c.mdnsName[0]) && !validHostname(c.mdnsName))", "if ((c.mdnsEnabled || c.mdnsName[0]) && false)"),
+    ("mdns field name", 'case NetCfgError::MdnsName: return "mdns.name";', 'case NetCfgError::MdnsName: return "mdns";'),
+]
+
 SETS = [
     ("devices", "src/devices/DeviceTypes.h", "test_devices", DEVICES),
     ("p4", "src/devices/DeviceTypes.h", "test_p4", P4),
@@ -709,6 +757,8 @@ SETS = [
     ("event ring", "src/core/EventRing.h", "test_p8b", RING),
     ("health", "src/core/HealthRules.h", "test_p8b", HEALTH),
     ("pin info", "src/devices/PinInfo.h", "test_p8b", PININFO),
+    ("mqtt", "src/net/MqttConfig.h", "test_mqtt", MQTT),
+    ("mdns", "src/net/NetworkConfig.h", "test_netconfig", MDNS),
 ]
 
 def run_tests(folder):

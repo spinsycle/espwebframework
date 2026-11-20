@@ -50,6 +50,26 @@ Scripts send `Authorization: Bearer <token>`. At most 3 sessions; idle sessions 
 
 `mode` is `ap`, `sta` or `ap_sta`. Reply `{"ok":true,"apply_in_ms":...}`: the change applies after the reply goes out. Errors: `400 invalid_network_config` with `field` (`mode`, `hostname`, `mdns.name`, `ap.ssid`, `ap.password`, `ap.channel`, `ap.ip`, `sta.*`, `format`). A bad AP password change can lock you out: after `uploadfs` the board is back at the factory settings.
 
+## MQTT
+
+`GET /mqtt` returns the settings (the password as `password_set`) and a `status` object (`enabled`, `connected`, `state` = `connected` / `connecting` / `waiting` / `off`, `error`, `published`, `received`, `commands_ok`, `commands_rejected`, `dropped`, `last_command_error`). `PUT /mqtt` takes any subset; a missing `password` keeps the stored one:
+
+```json
+{"enabled":true,"host":"192.168.1.10","port":1883,"user":"","password":"","base":"relays","keepalive":30}
+```
+
+`host` is an IP address or a DNS name (a `.local` name does not resolve on the ESP8266). `base` is 1-40 letters, digits, `-`, `_` and `/` (no wildcards, no leading or trailing `/`); it defaults to the board's hostname. `keepalive` is 5-600 s. Reply `{"ok":true}`: the board saves and reconnects from its main loop. Errors: `400 invalid_mqtt_config` with `field` (`host`, `port`, `user`, `password`, `base`, `keepalive`, `format`). `GET /status` also carries the same `mqtt` status.
+
+Topics (`<base>` = the base topic, `<id>` = a device id):
+
+| Topic | Direction | Payload |
+|---|---|---|
+| `<base>/status` | board publishes, retained | `online`; the broker publishes the last will `offline` when the board drops off |
+| `<base>/<id>/state` | board publishes, retained | the device's `state` object from `GET /devices` (for example `{"on":true}`), sent when it changes |
+| `<base>/<id>/set` | board subscribes | `on`, `off`, `toggle`, `stop`, a number, or (serial device) the text to send |
+
+`set` payloads by device: relay `on` / `off` / `true` / `false` / `1` / `0` / `toggle`; PWM a percent or `on` / `off`; motor a speed (-100..100), `stop` or `off`; servo an angle. A **retained** message on a `set` topic is ignored (it would replay an old command at every reconnect). Commands go through the same checks as `POST /command`, so a disabled or out-of-range one is counted in `commands_rejected`. MQTT is plain TCP, no TLS, LAN only.
+
 ## Devices
 
 `GET /devices` -> `{"devices":[{"id","name","type","pin",...,"enabled","failsafe_s","state":{...},"props":[...]}]}`. `props` lists what a dashboard component may bind to and whether it is writable.

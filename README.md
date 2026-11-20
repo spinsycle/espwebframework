@@ -41,6 +41,7 @@ lib_deps =
     esp32async/ESPAsyncWebServer@3.12.1
     bblanchon/ArduinoJson@7.4.3
     paulstoffregen/OneWire@2.3.8
+    marvinroger/AsyncMqttClient@0.9.0
 
 [env:nodemcuv2]
 platform = espressif8266@4.2.1

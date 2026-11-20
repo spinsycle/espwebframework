@@ -10,6 +10,7 @@
 #include "devices/DeviceRegistry.h"
 #include "net/HttpApi.h"
 #include "security/AuthManager.h"
+#include "net/MqttManager.h"
 #include "net/NetworkManager.h"
 #include "net/WsHub.h"
 
@@ -37,6 +38,7 @@ class FrameworkController {
   espwf::AutomationEngine automation_;
   espwf::AuthManager auth_;
   espwf::NetworkManager net_;
+  espwf::MqttManager mqtt_;
   espwf::HttpApi http_;
   espwf::WsHub ws_;
   uint32_t restartAt_ = 0;

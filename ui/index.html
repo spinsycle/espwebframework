@@ -279,6 +279,24 @@
       <button type="submit">Save and apply</button>
       <p id="netmsg" role="status"></p>
     </form>
+    <form id="mqttform" autocomplete="off">
+      <fieldset>
+        <legend>MQTT</legend>
+        <label class="row"><input name="m_enabled" type="checkbox"> Connect to an MQTT broker</label>
+        <div id="mqttbox">
+          <label>Broker address <input name="m_host" maxlength="64" placeholder="192.168.1.10"></label>
+          <label>Port <input name="m_port" type="number" min="1" max="65535"></label>
+          <label>User <input name="m_user" maxlength="32" placeholder="optional"></label>
+          <label>Password <input name="m_password" type="password" maxlength="64" placeholder="unchanged"></label>
+          <label>Base topic <input name="m_base" maxlength="40"></label>
+          <label>Keep-alive (s) <input name="m_keepalive" type="number" min="5" max="600"></label>
+          <p id="mqttprev" class="hint"></p>
+        </div>
+        <p id="mqttstat" role="status"></p>
+      </fieldset>
+      <button type="submit">Save MQTT</button>
+      <p id="mqttmsg" role="status"></p>
+    </form>
   </section>
 
   <section id="sys" hidden>

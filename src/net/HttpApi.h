@@ -12,10 +12,12 @@ class DeviceRegistry;
 class AutomationEngine;
 class AuthManager;
 class WsHub;
+class MqttManager;
 
 class HttpApi {
  public:
-  void begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry& devices, WsHub& ws, AutomationEngine& automation, AuthManager& auth);
+  void begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry& devices, WsHub& ws, AutomationEngine& automation, AuthManager& auth,
+             MqttManager& mqtt);
 
  private:
   AsyncWebServer* server_ = nullptr;  // allocated once, lives for the program's lifetime

@@ -25,7 +25,7 @@ document.querySelectorAll("#tabs button").forEach((b) =>
     if (b.dataset.tab === "dash") dashShow();
     if (b.dataset.tab === "automation") autoShow();
     if (b.dataset.tab === "dev") showDevices();
-    if (b.dataset.tab === "net") loadNet();
+    if (b.dataset.tab === "net") loadNet().then(loadMqtt).catch(() => {});  // one request at a time: the ESP8266 cannot answer several at once
     if (b.dataset.tab === "sys") loadSys();
     if (b.dataset.tab === "diag") diagShow();
   })
@@ -430,6 +430,51 @@ $("netform").addEventListener("submit", async (e) => {
   try {
     await api("/network", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: f.mode.value, hostname: f.hostname.value, mdns: { enabled: f.mdns_enabled.checked, name: f.mdns_name.value }, ap, sta }) });
     msg.textContent = "Applied. The device is switching networks; reconnect to it and reopen this page.";
+  } catch (err) {
+    msg.className = "err";
+    msg.textContent = "Rejected: " + err.message + (err.field ? " (" + err.field + ")" : "");
+  }
+});
+
+// ---- mqtt (lives on the Network tab)
+const M = () => $("mqttform").elements;
+function syncMqtt() {
+  const f = M();
+  $("mqttbox").hidden = !f.m_enabled.checked;
+  const b = f.m_base.value;
+  $("mqttprev").textContent = b ? "State: " + b + "/<device id>/state    Command: " + b + "/<device id>/set (on, off, toggle, stop or a number)    Status: " + b + "/status" : "";
+}
+function renderMqttStat(s) {
+  $("mqttstat").textContent = !s.enabled ? "Off." : "Broker: " + s.state + (s.error ? " (" + s.error + ")" : "") +
+    ". Published " + s.published + ", received " + s.received + ", rejected " + s.commands_rejected +
+    (s.last_command_error ? " (last: " + s.last_command_error + ")" : "") + ".";
+}
+async function loadMqtt() {
+  const c = await api("/mqtt");
+  const f = M();
+  f.m_enabled.checked = c.enabled;
+  f.m_host.value = c.host;
+  f.m_port.value = c.port;
+  f.m_user.value = c.user;
+  f.m_password.value = "";
+  f.m_password.placeholder = c.password_set ? "unchanged" : "none";
+  f.m_base.value = c.base;
+  f.m_keepalive.value = c.keepalive;
+  syncMqtt();
+  renderMqttStat(c.status);
+}
+$("mqttform").elements.m_enabled.addEventListener("change", syncMqtt);
+$("mqttform").elements.m_base.addEventListener("input", syncMqtt);
+$("mqttform").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = M(), msg = $("mqttmsg");
+  const body = { enabled: f.m_enabled.checked, host: f.m_host.value, port: +f.m_port.value, user: f.m_user.value, base: f.m_base.value, keepalive: +f.m_keepalive.value };
+  if (f.m_password.value) body.password = f.m_password.value;   // blank = keep current
+  msg.className = "";
+  try {
+    await api("/mqtt", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    msg.textContent = "Saved. The board reconnects to the broker in a moment.";
+    setTimeout(() => loadMqtt().catch(() => {}), 4000);
   } catch (err) {
     msg.className = "err";
     msg.textContent = "Rejected: " + err.message + (err.field ? " (" + err.field + ")" : "");

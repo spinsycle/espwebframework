@@ -5,6 +5,13 @@ mDNS (F1 of the v1.1 plan). Additive: `network.json` gains `mdns.enabled` (defau
 - Network tab: "Name on your network (mDNS)" checkbox and name; `relays` -> `http://relays.local`. Runs only with the Wi-Fi client connected; off means no responder and nothing else changes.
 - `GET /status` reports `network.mdns`.
 
+MQTT (F2 of the v1.1 plan). New dependency `marvinroger/AsyncMqttClient@0.9.0` (rides the AsyncTCP the web server already uses; picked over `espMqttClient`, which costs about 1.5 KB more static RAM on the ESP8266).
+- New `mqtt.json` (host, port, user, password, base topic, keep-alive, enabled; off by default), `GET`/`PUT /api/v1/mqtt`, an MQTT box on the Network tab, and `mqtt` in `GET /status`.
+- Publishes each device's state, retained, on change (`<base>/<id>/state`); accepts `<base>/<id>/set` (on, off, toggle, stop, a number, serial text) through `DeviceRegistry::requestCommand`; retained commands are ignored; last will `<base>/status`.
+- Reconnects with a 5 s to 60 s back-off; will not start a connection under about 8 KB free heap on the ESP8266.
+- `network.json` now keeps a `.bak` and checks `schema_version` on load; `kConfigFiles` lists the new files so a factory reset removes them.
+- ESP8266 static RAM 61.7% -> 63.3%; ESP32 flash 83.7% -> 86.6%.
+
 Four demo apps and a seed mechanism. Tooling and examples only; no API, config, device or firmware change.
 - `tools/build_ui.py`: an app's `seed/{devices,automation,dashboard}.json` ship in the filesystem image as `/config/*.json`, so a fresh `uploadfs` boots with the app's devices and rules. The build fails on invalid JSON or a `schema_version` other than 1; the firmware still validates entries at boot (a bad entry is skipped).
 - `examples/`: `relay_controller` (seeded), `light_sequencer`, `thermostat`, `pan_tilt_rover`, each with a README and wiring table.

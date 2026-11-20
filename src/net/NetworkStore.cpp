@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <LittleFS.h>
 
+#include "config/ConfigRules.h"
 #include "hal/Hal.h"
 
 namespace espwf {
@@ -10,6 +11,7 @@ namespace NetworkStore {
 
 static const char* kFile = "/config/network.json";
 static const char* kTmp = "/config/network.json.tmp";
+static const char* kBak = "/config/network.json.bak";
 
 static bool setStr(JsonVariantConst v, char* dst, unsigned cap, bool& bad) {
   if (v.isNull()) return false;
@@ -117,6 +119,8 @@ static bool readFile(const char* path, NetworkConfig& cfg) {
   DeserializationError e = deserializeJson(doc, f);
   f.close();
   if (e) return false;
+  JsonVariantConst sv = doc["schema_version"];
+  if (!sv.isNull() && (!sv.is<long>() || configSchemaCheck(sv.as<long>()) != SchemaCheck::Ok)) return false;
   NetworkConfig t = cfg;
   if (applyJson(doc.as<JsonVariantConst>(), t) != NetCfgError::Ok) return false;
   if (validateNetworkConfig(t) != NetCfgError::Ok) return false;
@@ -126,7 +130,7 @@ static bool readFile(const char* path, NetworkConfig& cfg) {
 
 bool load(NetworkConfig& cfg) {
   // A tmp file only survives if power failed between remove() and rename() in save().
-  return readFile(kFile, cfg) || readFile(kTmp, cfg);
+  return readFile(kFile, cfg) || readFile(kTmp, cfg) || readFile(kBak, cfg);
 }
 
 bool save(const NetworkConfig& cfg) {
@@ -139,7 +143,8 @@ bool save(const NetworkConfig& cfg) {
   size_t n = serializeJson(doc, f);
   f.close();
   if (n == 0) { LittleFS.remove(kTmp); return false; }
-  LittleFS.remove(kFile);
+  LittleFS.remove(kBak);
+  if (LittleFS.exists(kFile)) LittleFS.rename(kFile, kBak);  // keep the previous good copy as a fallback
   return LittleFS.rename(kTmp, kFile);
 }
 
