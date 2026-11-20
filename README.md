@@ -26,6 +26,7 @@ void loop()  { Framework.loop(); }
 ```
 
 ## Docs
+- [User guide](docs/USER_GUIDE.md) (with screenshots)
 - [Install and first run](docs/INSTALL.md)
 - [API reference](docs/API.md)
 - [Device drivers](docs/DRIVERS.md)

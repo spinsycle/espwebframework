@@ -218,7 +218,7 @@ function renderDevices() {
   if ($("dev").hidden) return;
   $("devempty").hidden = devices.length > 0;
   if (sliderInUse()) return;  // don't redraw under a slider being dragged
-  $("devlist").replaceChildren(...devices.map(devCard));
+  $("devlist").replaceChildren(...devices.map((d) => devCard(d)));
 }
 
 async function fetchDevices() {

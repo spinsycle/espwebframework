@@ -98,8 +98,8 @@ function autoRenderStatus() {
     const s = statusOf(card.dataset.rule);
     const line = card.querySelector(".rstat");
     if (!s || !line) return;
-    line.textContent = "ran " + s.fired + "x" + (s.fired ? " (" + ago(s.fired_ago_s) + ")" : "") + " Â· last: " + s.last.replace("_", " ") +
-      (s.failed ? " Â· " + s.failed + " failed" : "") + (s.unconfirmed ? " Â· " + s.unconfirmed + " not confirmed" : "");
+    line.textContent = "ran " + s.fired + "x" + (s.fired ? " (" + ago(s.fired_ago_s) + ")" : "") + " · last: " + s.last.replace("_", " ") +
+      (s.failed ? " · " + s.failed + " failed" : "") + (s.unconfirmed ? " · " + s.unconfirmed + " not confirmed" : "");
     line.className = "rstat" + (s.failed || s.unconfirmed ? " warn" : "");
   });
   $("aseqlist").querySelectorAll("[data-seq]").forEach((card) => {
@@ -121,7 +121,7 @@ function autoRenderStatus() {
     card.querySelectorAll(".rbar button").forEach((b) => { if (b.dataset.ctl === "stop") b.hidden = !t.running; });
   });
   const ev = $("aevents");
-  ev.replaceChildren(...(astat.events.length ? astat.events.map((e) => el("li", { textContent: ago(e.ago_s) + " Â· " + e.rule + " Â· " + e.kind + (e.text ? " Â· " + e.text : "") })) : [el("li", { className: "hint", textContent: "Nothing yet." })]));
+  ev.replaceChildren(...(astat.events.length ? astat.events.map((e) => el("li", { textContent: ago(e.ago_s) + " · " + e.rule + " · " + e.kind + (e.text ? " · " + e.text : "") })) : [el("li", { className: "hint", textContent: "Nothing yet." })]));
 }
 
 function autoRender() {
