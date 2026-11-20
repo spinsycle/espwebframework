@@ -52,7 +52,7 @@ void setup() { Framework.setDeviceName("My Device"); Framework.begin(); }
 void loop()  { Framework.loop(); }
 ```
 
-Pin the framework to a tag, never `main`. `tools/build_ui.py` gzips the dashboard from the installed library into the filesystem image; run `pio pkg install` once before the first build so the library is there.
+The framework repository is private: the machine that builds needs GitHub access (a stored credential or an SSH key), or PlatformIO cannot fetch the library. Pin the framework to a tag, never `main`. `tools/build_ui.py` gzips the dashboard from the installed library into the filesystem image; run `pio pkg install` once before the first build so the library is there.
 
 ## Flash
 Both steps, once per board (this PC, in the app folder). The second one **wipes all saved settings** (devices, Wi-Fi, password, rules); a firmware-only `upload` keeps them.
