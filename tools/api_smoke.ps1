@@ -1,4 +1,4 @@
-﻿# Exercises the device REST API on a live board. Usage: tools\api_smoke.ps1 -Ip 192.168.4.23 [-Chip esp8266|esp32]
+﻿# Exercises the device REST API on a live board. Usage: tools\api_smoke.ps1 -Ip <board-ip> [-Chip esp8266|esp32]
 # Adds and removes devices named smoke_*; it leaves nothing behind (and refuses to run if a smoke_* device exists).
 param([Parameter(Mandatory)][string]$Ip, [ValidateSet('esp8266', 'esp32')][string]$Chip = 'esp8266',
       [string]$Password = 'espframework', [string]$NewPassword = '', [switch]$Ota)

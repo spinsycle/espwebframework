@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """24-hour soak logger: polls /status, /devices and /diagnostics and writes one CSV row per pass.
 
-  python tools/soak.py --ip 192.168.4.23 --password espframework1 --hours 24 --out soak.csv
+  python tools/soak.py --ip <board-ip> --password <password> --hours 24 --out soak.csv
 
 Pass = no restart (uptime never goes down), reset reason never watchdog/exception, heap low-water not
 trending down, every reply complete JSON. Failures are counted, never fatal: a board that stops
