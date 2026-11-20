@@ -21,7 +21,7 @@ my-app/
 [env]
 extra_scripts = pre:tools/build_ui.py
 lib_deps =
-    https://github.com/spinsycle/espwebframework.git#v1.0.0
+    https://github.com/spinsycle/espwebframework.git#v1.0.1
     esp32async/ESPAsyncWebServer@3.12.1
     bblanchon/ArduinoJson@7.4.3
     paulstoffregen/OneWire@2.3.8

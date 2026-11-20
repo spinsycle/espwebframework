@@ -8,7 +8,7 @@ void tearDown() {}
 void test_version_string() {
   char buf[16];
   TEST_ASSERT_TRUE(espwf::versionString(buf, sizeof buf));
-  TEST_ASSERT_EQUAL_STRING("1.0.0", buf);
+  TEST_ASSERT_EQUAL_STRING("1.0.1", buf);
 }
 
 void test_version_string_too_small() {

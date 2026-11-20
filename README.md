@@ -15,7 +15,7 @@ LAN only. Plain HTTP, one shared password: not for the internet. MIT. Read [docs
 An app is a separate repo that pins this library by tag:
 
 ```ini
-lib_deps = https://github.com/spinsycle/espwebframework.git#v1.0.0
+lib_deps = https://github.com/spinsycle/espwebframework.git#v1.0.1
 ```
 
 ```cpp

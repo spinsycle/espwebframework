@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.0.1
+Dashboard fixes and a user guide. Only the Devices tab and the Automation tab text change; no API, config, device or firmware behaviour change.
+- Devices tab: only the first device card had disable, edit and remove (`devices.map(devCard)` passed the index as the `bare` flag). All cards have them now.
+- Automation tab: six double-encoded middle dots showed as `Â·`.
+- New `docs/USER_GUIDE.md` with screenshots.
+
 ## v1.0.0
 First stable release: the full spec on the ESP8266 NodeMCU (every phase P0-P8b passed its hardware checklist), the ESP32 build compiling and passing the native tests with its hardware checklists still open. From here the `/api/v1` surface, the `schema_version` 1 config format, device type and model names and error codes are frozen (`tools/check_frozen.py`): additions only. See `docs/SAFETY.md` for the known limits.
 

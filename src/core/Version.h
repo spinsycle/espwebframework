@@ -3,7 +3,7 @@
 namespace espwf {
 constexpr int kVersionMajor = 1;
 constexpr int kVersionMinor = 0;
-constexpr int kVersionPatch = 0;
+constexpr int kVersionPatch = 1;
 
 // Writes "major.minor.patch" into out; returns false if it does not fit.
 inline bool versionString(char* out, unsigned size) {
