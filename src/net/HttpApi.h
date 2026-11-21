@@ -13,11 +13,12 @@ class AutomationEngine;
 class AuthManager;
 class WsHub;
 class MqttManager;
+class RoleManager;
 
 class HttpApi {
  public:
   void begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry& devices, WsHub& ws, AutomationEngine& automation, AuthManager& auth,
-             MqttManager& mqtt);
+             MqttManager& mqtt, RoleManager* role);  // role is null on a build without it (ESP8266)
 
  private:
   AsyncWebServer* server_ = nullptr;  // allocated once, lives for the program's lifetime

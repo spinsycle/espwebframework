@@ -2,7 +2,7 @@
 
 ## You need
 - PlatformIO (`pip install platformio`, or the VS Code extension). Python 3 is already needed for it.
-- A NodeMCU (ESP8266) or an ESP32 DevKit (WROOM-32) and a USB cable.
+- A NodeMCU (ESP8266), an ESP32 DevKit (WROOM-32) or an ESP32-S3 DevKitC-1 and a USB cable.
 - Nothing else: the dashboard is vanilla HTML/JS shipped inside the firmware's filesystem image, with no CDN.
 
 ## Make an app
@@ -66,7 +66,7 @@ python -m platformio run -e nodemcuv2 -t upload
 python -m platformio run -e nodemcuv2 -t uploadfs
 ```
 
-Use `-e esp32dev` for an ESP32. Only one program can hold the serial port: close any serial monitor first.
+Use `-e esp32dev` for an ESP32 or `-e esp32s3` for an ESP32-S3 (the serial console is UART0, the port on the USB-UART connector; a module with 16 MB flash needs `board_upload.flash_size = 16MB` and `board_build.partitions = default_16MB.csv` in your `[env:esp32s3]`). Only one program can hold the serial port: close any serial monitor first.
 
 ## First sign-in
 1. The board starts its own Wi-Fi network `ESPWF-xxxxxx` (password `espframework`). Join it and open `http://192.168.73.1`.

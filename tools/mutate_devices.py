@@ -737,6 +737,80 @@ MDNS = [
     ("mdns field name", 'case NetCfgError::MdnsName: return "mdns.name";', 'case NetCfgError::MdnsName: return "mdns";'),
 ]
 
+ROLE = [
+    ("slave host needed", "if ((c.role == Role::Slave || c.host[0]) && !validHost(c.host))", "if ((c.host[0]) && !validHost(c.host))"),
+    ("master stored host checked", "if ((c.role == Role::Slave || c.host[0]) && !validHost(c.host))", "if ((c.role == Role::Slave) && !validHost(c.host))"),
+    ("port zero", "if (c.port < 1) return RoleCfgError::Port;", "if (c.port < 0) return RoleCfgError::Port;"),
+    ("slave password needed", "c.role == Role::Slave && c.pass[0] == 0", "c.pass[0] == 0"),
+    ("slave password only slave", "c.role == Role::Slave && c.pass[0] == 0", "false"),
+    ("max links", "c.nLinks > kMaxLinks", "c.nLinks >= kMaxLinks"),
+    ("link input id", "!detail::validDeviceId(l.input) ||", ""),
+    ("link remote id", "!detail::validDeviceId(l.remote) ||", ""),
+    ("link trigger range", "uint8_t(l.trig) > uint8_t(LinkTrig::Release) ||", ""),
+    ("link action range", "uint8_t(l.act) > uint8_t(LinkAct::Set) ||", ""),
+    ("link set lower", "l.value < -100 ||", "l.value < -101 ||"),
+    ("link set upper", "l.value > 180))", "l.value > 181))"),
+    ("link value only for set", "(l.act == LinkAct::Set && (", "(true && ("),
+    ("link duplicate ignores trigger", "bad = !strcmp(c.links[j].input, l.input) && c.links[j].trig == l.trig;", "bad = !strcmp(c.links[j].input, l.input);"),
+    ("link duplicate ignores input", "bad = !strcmp(c.links[j].input, l.input) && c.links[j].trig == l.trig;", "bad = c.links[j].trig == l.trig;"),
+    ("event press", "if (!s.active && active) ev |= kEvPress;", "if (active) ev |= kEvPress;"),
+    ("event release", "if (s.active && !active) ev |= kEvRelease;", "if (!active) ev |= kEvRelease;"),
+    ("event long", "if (longs != s.longs) ev |= kEvLong;", ""),
+    ("event prime", "if (s.primed) {", "if (true) {"),
+    ("fires mapping", "l.trig == LinkTrig::Long ? kEvLong : kEvRelease", "l.trig == LinkTrig::Long ? kEvRelease : kEvLong"),
+    ("queue toggles stack", "if (c.act != LinkAct::Toggle) {", "if (true) {"),
+    ("queue merge same id", "w.act != LinkAct::Toggle && !strcmp(w.id, c.id)", "w.act != LinkAct::Toggle"),
+    ("queue merge not toggle", "w.act != LinkAct::Toggle && !strcmp(w.id, c.id)", "!strcmp(w.id, c.id)"),
+    ("expiry boundary", "uint32_t(now - c.born) > kRemoteMaxAgeMs", "uint32_t(now - c.born) >= kRemoteMaxAgeMs"),
+    ("body fit", "return n > 0 && size_t(n) < cap;", "return n > 0 && size_t(n) <= cap;"),
+    ("body on", "\\\"value\\\":true}", "\\\"value\\\":false}"),
+    ("reply done upper", "status >= 200 && status < 300", "status >= 200 && status <= 300"),
+    ("reply done lower", "status >= 200 && status < 300", "status > 200 && status < 300"),
+    ("reply relogin", "if (status == 401) return CmdReply::Relogin;", ""),
+    ("reply default pw", "return passwordChangeRequired ? CmdReply::DefaultPassword : CmdReply::Rejected;", "return CmdReply::Rejected;"),
+    ("reply locked", "if (status == 429) return CmdReply::Locked;", ""),
+    ("reply retry no answer", "if (status == 503 || status < 0) return CmdReply::Retry;", "if (status == 503) return CmdReply::Retry;"),
+    ("backoff cap", "attempt > 5 ? 5 : attempt", "attempt > 4 ? 4 : attempt"),
+    ("backoff max", "return ms > 30000u ? 30000u : ms;", "return ms;"),
+    ("backoff base", "1000u <<", "500u <<"),
+]
+
+HTTPLITE = [
+    ("request final fit", "if (cap - o < 3 + bl) return 0;", "if (cap - o < 2 + bl) return 0;"),
+    ("request bearer", "if (bearer) {", "if (false) {"),
+    ("request content length", "Content-Length: %u", "Content-Length: %u0"),
+    ("status http 1.0", "(buf[7] != '0' && buf[7] != '1')", "(buf[7] != '1')"),
+    ("status digits", "if (buf[i] < '0' || buf[i] > '9') return -1;", ""),
+    ("json escape refused", "if (buf[j] == '\\\\' || k + 1 >= cap) return false;", "if (k + 1 >= cap) return false;"),
+    ("json closing quote", "if (j >= len) return false;  // the closing quote has not arrived yet", ""),
+    ("json quote start", "if (j >= len || buf[j] != '\"') return false;", "if (j >= len) return false;"),
+]
+
+S3 = [
+    ("max gpio", "if (gpio > 48 || (gpio >= 22 && gpio <= 25))", "if (gpio > 49 || (gpio >= 22 && gpio <= 25))"),
+    ("gap low", "(gpio >= 22 && gpio <= 25)", "(gpio >= 23 && gpio <= 25)"),
+    ("gap high", "(gpio >= 22 && gpio <= 25)", "(gpio >= 22 && gpio <= 24)"),
+    ("flash low", "((gpio >= 26 && gpio <= 37)", "((gpio >= 27 && gpio <= 37)"),
+    ("flash high", "((gpio >= 26 && gpio <= 37)", "((gpio >= 26 && gpio <= 36)"),
+    ("usb 19", "|| gpio == 19 || gpio == 20 ||", "|| gpio == 20 ||"),
+    ("usb 20", "|| gpio == 19 || gpio == 20 ||", "|| gpio == 19 ||"),
+    ("uart 43", "|| gpio == 43 || gpio == 44) return PinErr::Reserved;", "|| gpio == 44) return PinErr::Reserved;"),
+    ("uart 44", "|| gpio == 43 || gpio == 44) return PinErr::Reserved;", "|| gpio == 43) return PinErr::Reserved;"),
+    ("gpio46 input only", "if (gpio == 46 && role != PinRole::Input) return PinErr::InputOnly;", ""),
+    ("pullup 46", "if (chip == Chip::Esp32S3) return gpio != 46;", "if (chip == Chip::Esp32S3) return gpio != 45;"),
+    ("strapping 45", "gpio == 0 || gpio == 3 || gpio == 45 || gpio == 46;", "gpio == 0 || gpio == 3 || gpio == 46;"),
+    ("strapping 3", "gpio == 0 || gpio == 3 || gpio == 45 || gpio == 46;", "gpio == 0 || gpio == 45 || gpio == 46;"),
+    ("i2c sda", "chip == Chip::Esp32S3 ? 8 : 21", "chip == Chip::Esp32S3 ? 9 : 21"),
+    ("i2c scl", "chip == Chip::Esp32S3 ? 9 : 22", "chip == Chip::Esp32S3 ? 8 : 22"),
+    ("baud", "chip != Chip::Esp8266 || b <= 38400", "chip == Chip::Esp32 || b <= 38400"),
+    ("one pwm frequency", "chip != Chip::Esp32 && usesPwmSlot(c))", "chip == Chip::Esp8266 && usesPwmSlot(c))"),
+]
+
+S3_INFO = [
+    ("usb note", '(gpio == 19 || gpio == 20) ? "usb"', '(gpio == 19 || gpio == 20) ? "flash"'),
+    ("uart note", '(gpio == 43 || gpio == 44) ? "uart"', '(gpio == 43 || gpio == 44) ? "flash"'),
+]
+
 SETS = [
     ("devices", "src/devices/DeviceTypes.h", "test_devices", DEVICES),
     ("p4", "src/devices/DeviceTypes.h", "test_p4", P4),
@@ -759,6 +833,10 @@ SETS = [
     ("pin info", "src/devices/PinInfo.h", "test_p8b", PININFO),
     ("mqtt", "src/net/MqttConfig.h", "test_mqtt", MQTT),
     ("mdns", "src/net/NetworkConfig.h", "test_netconfig", MDNS),
+    ("role", "src/net/RoleConfig.h", "test_role", ROLE),
+    ("http lite", "src/net/HttpLite.h", "test_role", HTTPLITE),
+    ("s3", "src/devices/DeviceTypes.h", "test_s3", S3),
+    ("s3 info", "src/devices/PinInfo.h", "test_s3", S3_INFO),
 ]
 
 def run_tests(folder):

@@ -4,8 +4,10 @@ Set-Location (Split-Path $PSScriptRoot -Parent)
 $steps = @(
   @('build nodemcuv2', @('run','-e','nodemcuv2')),
   @('build esp32dev',  @('run','-e','esp32dev')),
+  @('build esp32s3',   @('run','-e','esp32s3')),
   @('fs image nodemcuv2', @('run','-e','nodemcuv2','-t','buildfs')),
   @('fs image esp32dev',  @('run','-e','esp32dev','-t','buildfs')),
+  @('fs image esp32s3',   @('run','-e','esp32s3','-t','buildfs')),
   @('native tests',    @('test','-e','native'))
 )
 Write-Host '== frozen API'
@@ -18,7 +20,7 @@ foreach ($s in $steps) {
 }
 $root = Get-Location
 foreach ($app in Get-ChildItem examples -Directory | Where-Object { (Test-Path (Join-Path $_.FullName 'platformio.ini')) -and ($_.Name -ne 'smoke') }) {
-  foreach ($e in 'nodemcuv2','esp32dev') {
+  foreach ($e in 'nodemcuv2','esp32dev','esp32s3') {
     foreach ($t in @(@(), @('-t','buildfs'))) {
       Write-Host "== example $($app.Name) $e $($t -join ' ')"
       Set-Location $app.FullName

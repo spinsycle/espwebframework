@@ -12,6 +12,19 @@ MQTT (F2 of the v1.1 plan). New dependency `marvinroger/AsyncMqttClient@0.9.0` (
 - `network.json` now keeps a `.bak` and checks `schema_version` on load; `kConfigFiles` lists the new files so a factory reset removes them.
 - ESP8266 static RAM 61.7% -> 63.3%; ESP32 flash 83.7% -> 86.6%.
 
+Master / slave over REST (F3 of the v1.1 plan). Additive; a board that never sets a role behaves exactly as before (master).
+- New `role.json` (role, master address and password, up to 8 button links), `GET`/`PUT /api/v1/role`, a Role box on the Network tab, `role` in `GET /status`.
+- A slave watches its own input devices (`DeviceRegistry::inputSnapshot`) and sends `toggle` / `on` / `off` / `set` to the master's `POST /api/v1/command` on a press, long press or release. Logs in once, keeps the session token, logs in again on a `401`; one request at a time.
+- A command not delivered within 10 s is dropped, never sent late (an irrigation valve must not open minutes after the button press). A wrong password stops login attempts for 10 minutes; a master on the factory password is refused.
+- The master needs nothing new: the slave uses the existing REST API.
+- Remote state mirroring (showing the master's relay state on the slave) is not in this release.
+- **ESP32 family only.** The ESP8266 build compiles the role code out (`src/core/Features.h`, `ESPWF_HAS_ROLE`): the slave's TCP client and buffers did not leave enough heap for the web server on a NodeMCU. An ESP8266 is always a master, `/api/v1/role` answers 404 there, and the Role box stays hidden. ESP8266 static RAM is 63.4%, back where F2 left it.
+
+ESP32-S3 support (new `esp32s3` environment, board `esp32-s3-devkitc-1`). Compile-checked and covered by native tests; not yet run on a board.
+- New `Chip::Esp32S3` with its own pin rules: GPIO 22-25 do not exist; 26-37 (flash and octal PSRAM), 19-20 (native USB) and 43-44 (UART0) are reserved; 46 is input-only; strapping pins 0, 3, 45, 46; I2C on GPIO 8 / 9; the GPIO inspector lists 0-48.
+- PWM: the S3's 8 LEDC channels share 4 timers, so all PWM devices on an S3 must use one frequency (like the ESP8266). The classic ESP32 is unchanged.
+- The classic ESP32 and ESP8266 behaviour is unchanged (the `Chip` enum only gains a value at the end).
+
 Four demo apps and a seed mechanism. Tooling and examples only; no API, config, device or firmware change.
 - `tools/build_ui.py`: an app's `seed/{devices,automation,dashboard}.json` ship in the filesystem image as `/config/*.json`, so a fresh `uploadfs` boots with the app's devices and rules. The build fails on invalid JSON or a `schema_version` other than 1; the firmware still validates entries at boot (a bad entry is skipped).
 - `examples/`: `relay_controller` (seeded), `light_sequencer`, `thermostat`, `pan_tilt_rover`, each with a README and wiring table.

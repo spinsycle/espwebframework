@@ -9,6 +9,9 @@
 #include "config/ConfigRules.h"
 #include "net/MqttStore.h"
 #include "net/NetworkStore.h"
+#if ESPWF_HAS_ROLE
+#include "net/RoleStore.h"
+#endif
 
 using namespace espwf;
 
@@ -43,9 +46,18 @@ bool FrameworkController::begin() {
   setMqttDefaults(mcfg, cfg.hostname);
   if (MqttStore::load(mcfg)) Serial.println("[espwf] mqtt config loaded");
   mqtt_.begin(mcfg, devices_, net_);
+#if ESPWF_HAS_ROLE
+  RoleConfig rcfg;
+  if (RoleStore::load(rcfg)) Serial.println("[espwf] role config loaded");
+  role_.begin(rcfg, devices_, net_);
+#endif
   automation_.begin(devices_, net_);
   auth_.begin();
-  http_.begin(*this, net_, devices_, ws_, automation_, auth_, mqtt_);
+  #if ESPWF_HAS_ROLE
+  http_.begin(*this, net_, devices_, ws_, automation_, auth_, mqtt_, &role_);
+#else
+  http_.begin(*this, net_, devices_, ws_, automation_, auth_, mqtt_, nullptr);
+#endif
   Serial.printf("[espwf] ready, AP '%s'\n", cfg.apSsid);
   return true;
 }
@@ -60,6 +72,13 @@ void FrameworkController::loop() {
     nextHeapSample_ = t + 500;
     uint32_t h = hal::freeHeap();
     if (h < minHeap_) minHeap_ = h;
+#ifdef ESPWF_HEAP_LOG  // build with -DESPWF_HEAP_LOG to see the heap on the serial console every 5 s
+    static uint32_t lastHeapLog = 0;
+    if (t - lastHeapLog >= 5000) {
+      lastHeapLog = t;
+      Serial.printf("[heap] %lu free %u max_block %u min %u\n", (unsigned long)t, (unsigned)h, (unsigned)hal::maxFreeBlock(), (unsigned)minHeap_);
+    }
+#endif
   }
 #if defined(ESP8266)
   if (wdtTest_) {  // never returns: the software watchdog resets the board after about 3 seconds
@@ -87,6 +106,9 @@ void FrameworkController::loop() {
   ws_.loop();
   net_.loop();
   mqtt_.loop();
+#if ESPWF_HAS_ROLE
+  role_.loop();
+#endif
   if (restartPending_ && int32_t(millis() - restartAt_) >= 0) hal::restart();
 }
 
@@ -138,4 +160,7 @@ void FrameworkController::getStatus(JsonObject out) const {
   out["ws_clients"] = ws_.clientCount();
   net_.status(out["network"].to<JsonObject>());
   mqtt_.status(out["mqtt"].to<JsonObject>());
+#if ESPWF_HAS_ROLE
+  role_.status(out["role"].to<JsonObject>());
+#endif
 }

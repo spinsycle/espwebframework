@@ -1,6 +1,6 @@
 # ESP Web Framework
 
-A reusable firmware library that turns an **ESP8266 NodeMCU** or **ESP32 DevKit** into a self-hosted web controller. Add it to a PlatformIO project, list your hardware in the browser, and you get a live dashboard, a REST and WebSocket API, and an automation engine that runs on the board with no browser open. No cloud, no CDN, no app to install.
+A reusable firmware library that turns an **ESP8266 NodeMCU**, an **ESP32 DevKit** or an **ESP32-S3** into a self-hosted web controller. Add it to a PlatformIO project, list your hardware in the browser, and you get a live dashboard, a REST and WebSocket API, and an automation engine that runs on the board with no browser open. No cloud, no CDN, no app to install.
 
 ![Dashboard](docs/img/03-dashboard-auto.png)
 
@@ -79,7 +79,7 @@ python -m platformio run -e nodemcuv2 -t upload
 python -m platformio run -e nodemcuv2 -t uploadfs
 ```
 
-Use `-e esp32dev` for an ESP32.
+Use `-e esp32dev` for an ESP32 or `-e esp32s3` for an ESP32-S3.
 
 **4. Sign in.** Join the board's Wi-Fi `ESPWF-xxxxxx` (password `espframework`), open `http://192.168.73.1`, sign in with the factory password, and choose a new one. Then add your home Wi-Fi on the Network tab and start adding devices.
 
@@ -139,11 +139,13 @@ The page is responsive, so a phone or tablet is the controller in the field.
 
 ## Supported hardware and devices
 
-| | ESP8266 (NodeMCU) | ESP32 (DevKit WROOM-32) |
-|---|---|---|
-| Devices | 16 | 32 |
-| PWM-timed outputs (PWM, motor, direct servo) | 8 | 8 |
-| Sessions signed in / live WebSocket pages | 3 / 3 | 3 / 3 |
+| | ESP8266 (NodeMCU) | ESP32 (DevKit WROOM-32) | ESP32-S3 (DevKitC-1) |
+|---|---|---|---|
+| Devices | 16 | 32 | 32 |
+| PWM-timed outputs (PWM, motor, direct servo) | 8 | 8 | 8, one shared frequency |
+| Sessions signed in / live WebSocket pages | 3 / 3 | 3 / 3 | 3 / 3 |
+| MQTT, mDNS | yes | yes | yes |
+| Master / slave (a board whose buttons control another board) | no, always a master (not enough RAM) | yes | yes |
 
 | Device type | Notes |
 |---|---|

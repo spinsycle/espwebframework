@@ -297,6 +297,28 @@
       <button type="submit">Save MQTT</button>
       <p id="mqttmsg" role="status"></p>
     </form>
+    <form id="roleform" autocomplete="off" hidden>  <!-- shown by app.js only when the firmware has /api/v1/role (ESP32 family) -->
+      <fieldset>
+        <legend>Role</legend>
+        <label>This board is a
+          <select name="r_role">
+            <option value="master">Master: runs as normal, owns the relays</option>
+            <option value="slave">Slave: its buttons control a master</option>
+          </select>
+        </label>
+        <div id="slavebox">
+          <label>Master address <input name="r_host" maxlength="64" placeholder="192.168.1.50"></label>
+          <label>Port <input name="r_port" type="number" min="1" max="65535"></label>
+          <label>Master password <input name="r_password" type="password" maxlength="64" placeholder="unchanged"></label>
+          <p class="hint">Use the master's IP address (give it a fixed one): a .local name does not resolve on the ESP8266. The master must not still have the factory password. A command not delivered within 10 seconds is dropped, never sent late.</p>
+          <div id="linkrows"></div>
+          <button type="button" id="addlink">Add link</button>
+        </div>
+        <p id="rolestat" role="status"></p>
+      </fieldset>
+      <button type="submit">Save role</button>
+      <p id="rolemsg" role="status"></p>
+    </form>
   </section>
 
   <section id="sys" hidden>

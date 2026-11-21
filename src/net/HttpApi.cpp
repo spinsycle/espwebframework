@@ -18,6 +18,11 @@
 #include "devices/DeviceStore.h"
 #include "net/MqttManager.h"
 #include "net/MqttStore.h"
+#include "core/Features.h"
+#if ESPWF_HAS_ROLE
+#include "net/RoleManager.h"
+#include "net/RoleStore.h"
+#endif
 #include "net/NetworkStore.h"
 #include "core/EventLog.h"
 #include "devices/PinInfo.h"
@@ -76,9 +81,14 @@ static int statusFor(AutoErr e) {
 static void sendAutoErr(AsyncWebServerRequest* r, AutoErr e) { sendError(r, statusFor(e), autoErrCode(e), autoErrField(e)); }
 
 void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry& devices, WsHub& ws, AutomationEngine& automation, AuthManager& auth,
-                    MqttManager& mqtt) {
+                    MqttManager& mqtt, RoleManager* role) {
   server_ = new AsyncWebServer(80);
   MqttManager* mq = &mqtt;
+#if ESPWF_HAS_ROLE
+  RoleManager* rm = role;
+#else
+  (void)role;
+#endif
   ws.attach(*server_, fw, devices, auth);  // before the static-file handler, which would otherwise answer /ws
   FrameworkController* f = &fw;
   NetworkManager* n = &net;
@@ -157,6 +167,9 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry
 #if defined(ESP8266)
     const Chip chip = Chip::Esp8266;
     const int last = 16;
+#elif defined(CONFIG_IDF_TARGET_ESP32S3)
+    const Chip chip = Chip::Esp32S3;
+    const int last = 48;
 #else
     const Chip chip = Chip::Esp32;
     const int last = 39;
@@ -256,6 +269,35 @@ void HttpApi::begin(FrameworkController& fw, NetworkManager& net, DeviceRegistry
   mput->setMethod(HTTP_PUT);
   mput->setMaxContentLength(512);
   server_->addHandler(mput);
+
+#if ESPWF_HAS_ROLE
+  // ---- role (master / slave and the slave's links). The password is never returned; a PUT without one keeps it.
+  server_->on("/api/v1/role", HTTP_GET, [rm](AsyncWebServerRequest* r) {
+    JsonDocument d;
+    RoleStore::toJson(rm->config(), d.to<JsonObject>(), false);
+    rm->status(d["status"].to<JsonObject>());
+    sendJson(r, d);
+  });
+
+  auto* rput = new AsyncCallbackJsonWebHandler("/api/v1/role", [rm](AsyncWebServerRequest* r, JsonVariant& json) {
+    RoleConfig c = rm->config();
+    int bad = -1;
+    RoleCfgError e = RoleStore::applyJson(json, c, &bad);
+    if (e == RoleCfgError::Ok) e = rm->requestApply(c, &bad);
+    if (e != RoleCfgError::Ok) {
+      char field[24];
+      if (bad >= 0) snprintf(field, sizeof field, "links[%d]", bad); else snprintf(field, sizeof field, "%s", roleCfgErrorField(e));
+      sendError(r, 400, "invalid_role_config", field);
+      return;
+    }
+    JsonDocument d;
+    d["ok"] = true;
+    sendJson(r, d);
+  });
+  rput->setMethod(HTTP_PUT);
+  rput->setMaxContentLength(1536);
+  server_->addHandler(rput);
+#endif  // ESPWF_HAS_ROLE
 
   // ---- devices. Config changes and commands are queued (202); loop() applies them.
   server_->on("/api/v1/devices", HTTP_GET, [dv](AsyncWebServerRequest* r) {

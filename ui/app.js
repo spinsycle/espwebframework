@@ -25,7 +25,7 @@ document.querySelectorAll("#tabs button").forEach((b) =>
     if (b.dataset.tab === "dash") dashShow();
     if (b.dataset.tab === "automation") autoShow();
     if (b.dataset.tab === "dev") showDevices();
-    if (b.dataset.tab === "net") loadNet().then(loadMqtt).catch(() => {});  // one request at a time: the ESP8266 cannot answer several at once
+    if (b.dataset.tab === "net") loadNet().then(loadMqtt).then(loadRole).catch(() => {});  // one request at a time: the ESP8266 cannot answer several at once
     if (b.dataset.tab === "sys") loadSys();
     if (b.dataset.tab === "diag") diagShow();
   })
@@ -475,6 +475,63 @@ $("mqttform").addEventListener("submit", async (e) => {
     await api("/mqtt", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     msg.textContent = "Saved. The board reconnects to the broker in a moment.";
     setTimeout(() => loadMqtt().catch(() => {}), 4000);
+  } catch (err) {
+    msg.className = "err";
+    msg.textContent = "Rejected: " + err.message + (err.field ? " (" + err.field + ")" : "");
+  }
+});
+
+// ---- role (also on the Network tab): master, or slave with its button links
+const R = () => $("roleform").elements;
+function syncRole() { $("slavebox").hidden = R().r_role.value !== "slave"; }
+function linkRow(l) {
+  const sel = (opts, v) => { const s = el("select"); opts.forEach((o) => s.append(el("option", { value: o, textContent: o }))); s.value = v; return s; };
+  const row = el("div", { className: "linkrow" });
+  const input = el("input", { placeholder: "button id", maxLength: 16, value: l.input || "" });
+  const trig = sel(["press", "long", "release"], l.trigger || "press");
+  const remote = el("input", { placeholder: "remote device id", maxLength: 16, value: l.remote || "" });
+  const act = sel(["toggle", "on", "off", "set"], l.action || "toggle");
+  const val = el("input", { type: "number", min: -100, max: 180, value: l.value === undefined ? 50 : l.value, title: "value for set" });
+  const sync = () => (val.hidden = act.value !== "set");
+  act.addEventListener("change", sync);
+  sync();
+  const rm = el("button", { type: "button", textContent: "Remove" });
+  rm.onclick = () => row.remove();
+  row.append(el("span", { textContent: "When" }), input, trig, el("span", { textContent: "then" }), act, el("span", { textContent: "on" }), remote, val, rm);
+  row._get = () => { const o = { input: input.value, trigger: trig.value, remote: remote.value, action: act.value }; if (act.value === "set") o.value = +val.value; return o; };
+  return row;
+}
+function renderRoleStat(s) {
+  if (s.role !== "slave") { $("rolestat").textContent = "This board runs as a master."; return; }
+  $("rolestat").textContent = "Master link: " + s.state + (s.error ? " (" + s.error + ")" : "") + ". Sent " + s.sent + ", rejected " + s.rejected +
+    ", dropped late " + s.expired + (s.missing_inputs ? ", " + s.missing_inputs + " link(s) point at a button that does not exist" : "") +
+    (s.last_reject ? " (last rejected: " + s.last_reject + ")" : "") + ".";
+}
+async function loadRole() {
+  const c = await api("/role");   // a board without it (ESP8266) answers 404: the form then stays hidden
+  $("roleform").hidden = false;
+  const f = R();
+  f.r_role.value = c.role;
+  f.r_host.value = c.host;
+  f.r_port.value = c.port;
+  f.r_password.value = "";
+  f.r_password.placeholder = c.password_set ? "unchanged" : "none";
+  $("linkrows").replaceChildren(...c.links.map(linkRow));
+  syncRole();
+  renderRoleStat(c.status);
+}
+$("roleform").elements.r_role.addEventListener("change", syncRole);
+$("addlink").onclick = () => { if ($("linkrows").children.length < 8) $("linkrows").append(linkRow({})); };
+$("roleform").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = R(), msg = $("rolemsg");
+  const body = { role: f.r_role.value, host: f.r_host.value, port: +f.r_port.value, links: [...$("linkrows").children].map((r) => r._get()) };
+  if (f.r_password.value) body.password = f.r_password.value;   // blank = keep current
+  msg.className = "";
+  try {
+    await api("/role", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    msg.textContent = "Saved.";
+    setTimeout(() => loadRole().catch(() => {}), 2000);
   } catch (err) {
     msg.className = "err";
     msg.textContent = "Rejected: " + err.message + (err.field ? " (" + err.field + ")" : "");

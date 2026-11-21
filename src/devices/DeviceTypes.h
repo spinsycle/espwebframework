@@ -8,7 +8,9 @@ namespace espwf {
 
 // ---- pin policy -----------------------------------------------------------------------------
 
-enum class Chip : uint8_t { Esp8266, Esp32 };
+// Esp32S3 is appended: the classic ESP32 (WROOM-32 DevKit) keeps its value. S3 pin rules follow Espressif's
+// ESP32-S3 datasheet and the common 8 MB flash / octal PSRAM modules (N8R8); a plain N8 module wastes GPIO 33-37.
+enum class Chip : uint8_t { Esp8266, Esp32, Esp32S3 };
 enum class PinRole : uint8_t { Output, Input, Pwm };
 enum class PinErr : uint8_t { Ok, Invalid, Reserved, InputOnly, NoPwm };
 
@@ -21,17 +23,29 @@ inline PinErr checkPin(Chip chip, int gpio, PinRole role) {
     if (role == PinRole::Pwm && gpio == 16) return PinErr::NoPwm;  // GPIO16 has no PWM timer
     return PinErr::Ok;
   }
+  if (chip == Chip::Esp32S3) {
+    if (gpio > 48 || (gpio >= 22 && gpio <= 25)) return PinErr::Invalid;  // 22-25 do not exist
+    // 26-37: SPI flash, and octal flash / PSRAM on the R8 modules. 19, 20: the native USB. 43, 44: UART0, the serial log.
+    if ((gpio >= 26 && gpio <= 37) || gpio == 19 || gpio == 20 || gpio == 43 || gpio == 44) return PinErr::Reserved;
+    if (gpio == 46 && role != PinRole::Input) return PinErr::InputOnly;
+    return PinErr::Ok;
+  }
   if (gpio > 39 || gpio == 20 || gpio == 24 || (gpio >= 28 && gpio <= 31)) return PinErr::Invalid;
   if ((gpio >= 6 && gpio <= 11) || gpio == 1 || gpio == 3) return PinErr::Reserved;
   if (gpio >= 34 && role != PinRole::Input) return PinErr::InputOnly;
   return PinErr::Ok;
 }
 
-inline bool pinHasPullup(Chip chip, int gpio) { return chip == Chip::Esp8266 ? gpio != 16 : gpio < 34; }
+inline bool pinHasPullup(Chip chip, int gpio) {
+  if (chip == Chip::Esp8266) return gpio != 16;
+  if (chip == Chip::Esp32S3) return gpio != 46;
+  return gpio < 34;
+}
 
 // Strapping pins: usable, but what is wired to them can stop the board from booting.
 inline bool pinBootSensitive(Chip chip, int gpio) {
   if (chip == Chip::Esp8266) return gpio == 0 || gpio == 2 || gpio == 15;
+  if (chip == Chip::Esp32S3) return gpio == 0 || gpio == 3 || gpio == 45 || gpio == 46;
   return gpio == 0 || gpio == 2 || gpio == 5 || gpio == 12 || gpio == 15;
 }
 
@@ -196,8 +210,8 @@ inline bool validDeviceId(const char* s) {
 }  // namespace detail
 
 // I2C bus pins are fixed per chip (the default Wire pins of the NodeMCU and the ESP32 DevKit).
-inline int i2cSda(Chip chip) { return chip == Chip::Esp8266 ? 4 : 21; }
-inline int i2cScl(Chip chip) { return chip == Chip::Esp8266 ? 5 : 22; }
+inline int i2cSda(Chip chip) { return chip == Chip::Esp8266 ? 4 : chip == Chip::Esp32S3 ? 8 : 21; }
+inline int i2cScl(Chip chip) { return chip == Chip::Esp8266 ? 5 : chip == Chip::Esp32S3 ? 9 : 22; }
 
 inline bool isI2cDevice(const DeviceConfig& c) {
   return (c.type == DeviceType::Servo || c.type == DeviceType::Sensor) && c.model == 1;
@@ -283,7 +297,7 @@ inline const char* i2cKnownName(uint8_t a) {
 inline bool baudOk(Chip chip, uint32_t b) {
   static const uint32_t ok[] = {1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200};
   for (uint32_t v : ok)
-    if (v == b) return chip == Chip::Esp32 || b <= 38400;  // ESP8266 uses software serial
+    if (v == b) return chip != Chip::Esp8266 || b <= 38400;  // ESP8266 uses software serial
   return false;
 }
 
@@ -306,7 +320,7 @@ inline DevErr validateDevice(const DeviceConfig& c, Chip chip, const DeviceConfi
   }
   if (usesPwmSlot(c) && pwmCount >= kMaxPwm) return DevErr::PwmLimit;
   if (c.type == DeviceType::Serial && serialCount >= 1) return DevErr::SerialLimit;
-  if (chip == Chip::Esp8266 && usesPwmSlot(c))  // one PWM frequency for the whole chip
+  if (chip != Chip::Esp32 && usesPwmSlot(c))  // one PWM frequency for the whole chip (ESP8266; the S3 has 8 LEDC channels on 4 timers)
     for (size_t i = 0; i < n; i++)
       if (int(i) != skip && usesPwmSlot(others[i]) && pwmFreq(others[i]) != pwmFreq(c)) return DevErr::FreqConflict;
 

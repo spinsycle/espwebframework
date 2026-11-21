@@ -32,6 +32,8 @@ static const char* const kConfigFiles[] = {
     "/config/network.json.bak",
     "/config/mqtt.json",        "/config/mqtt.json.tmp",
     "/config/mqtt.json.bak",
+    "/config/role.json",        "/config/role.json.tmp",
+    "/config/role.json.bak",
 };
 constexpr size_t kConfigFileCount = sizeof kConfigFiles / sizeof kConfigFiles[0];
 

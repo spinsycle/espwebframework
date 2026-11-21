@@ -17,7 +17,10 @@ inline const char* pinLabel(Chip chip, int gpio) {
 
 // Why a pin needs care, or "" if it does not. Reserved pins are listed but never read.
 inline const char* pinNote(Chip chip, int gpio) {
-  if (checkPin(chip, gpio, PinRole::Input) == PinErr::Reserved) return (gpio == 1 || gpio == 3) ? "uart" : "flash";
+  if (checkPin(chip, gpio, PinRole::Input) == PinErr::Reserved) {
+    if (chip == Chip::Esp32S3) return (gpio == 43 || gpio == 44) ? "uart" : (gpio == 19 || gpio == 20) ? "usb" : "flash";
+    return (gpio == 1 || gpio == 3) ? "uart" : "flash";
+  }
   if (pinBootSensitive(chip, gpio)) return "strapping";
   if (checkPin(chip, gpio, PinRole::Output) == PinErr::InputOnly) return "input_only";
   if (checkPin(chip, gpio, PinRole::Pwm) == PinErr::NoPwm) return "no_pwm";

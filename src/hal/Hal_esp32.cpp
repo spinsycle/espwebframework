@@ -9,7 +9,11 @@
 namespace espwf {
 namespace hal {
 
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+const char* chipName() { return "ESP32-S3"; }
+#else
 const char* chipName() { return "ESP32"; }
+#endif
 
 uint32_t chipId() {
   // Efuse MAC is little-endian in the 64-bit value: octet i = byte i.
@@ -53,11 +57,17 @@ static portMUX_TYPE gMux = portMUX_INITIALIZER_UNLOCKED;
 CriticalSection::CriticalSection() { portENTER_CRITICAL(&gMux); }
 CriticalSection::~CriticalSection() { portEXIT_CRITICAL(&gMux); }
 
-// LEDC: a device in slot n uses channel 2n, so its timer (channel/2 % 4, per speed group) is its own and
-// devices can have different frequencies. Resolution is the finest the frequency allows, up to 14 bits.
+// LEDC. ESP32: a device in slot n uses channel 2n, so its timer (channel/2 % 4, per speed group) is its own and
+// devices can have different frequencies. ESP32-S3: only 8 channels (no high-speed group), channel n = slot n, two
+// channels share a timer, so all PWM devices must use one frequency (validateDevice enforces it).
+// Resolution is the finest the frequency allows, up to 14 bits.
 static uint8_t gBits[8];
 
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+static inline uint8_t ledcChannel(uint8_t slot) { return slot; }
+#else
 static inline uint8_t ledcChannel(uint8_t slot) { return uint8_t(slot * 2); }
+#endif
 
 void pwmAttach(int pin, uint32_t freqHz, uint8_t slot) {
   uint8_t bits = 14;

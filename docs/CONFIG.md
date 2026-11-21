@@ -6,6 +6,7 @@ All settings live as JSON under `/config/` on LittleFS. Every file has `"schema_
 |---|---|---|
 | `network.json` | mode, hostname, mDNS (`enabled`, `name`), AP and STA settings, Wi-Fi passwords | no |
 | `mqtt.json` | broker host and port, user, password, base topic, keep-alive, enabled | no (holds a password) |
+| `role.json` | role (master / slave), the master's address and password, the slave's button links | no (holds a password) |
 | `devices.json` | the device list | yes |
 | `dashboard.json` | dashboard layout | no |
 | `automation.json` | settings, rules, sequences, timers | no |

@@ -123,3 +123,8 @@ dt{color:var(--dim)} dd{margin:0;word-break:break-word}
 #fwcard progress{width:100%}
 #fwmsg{min-height:1.4em;color:var(--dim)}
 #fwmsg.err{color:var(--bad)}
+
+.linkrow{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0}
+.linkrow input[type=text],.linkrow input:not([type]){width:7.5em}
+.linkrow input[type=number]{width:5em}
+#rolestat{color:var(--dim)}

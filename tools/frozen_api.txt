@@ -117,6 +117,7 @@ http error: busy
 http error: confirm_required
 http error: invalid_mqtt_config
 http error: invalid_network_config
+http error: invalid_role_config
 http error: locked
 http error: not_found
 http error: not_supported
@@ -194,6 +195,7 @@ route: /api/v1/i2c/scan
 route: /api/v1/mqtt
 route: /api/v1/network
 route: /api/v1/password
+route: /api/v1/role
 route: /api/v1/session
 route: /api/v1/status
 route: /api/v1/system

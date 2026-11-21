@@ -45,6 +45,8 @@ class DeviceRegistry {
   // it does not offer that property, or a sensor has no good reading right now.
   bool readProp(const char* id, Prop p, double& out) const;  // current config of one device; false if absent
   DevErr requestUpdate(const DeviceConfig& cfg);          // edit in place: same id and type, new settings
+  // A button's debounced state and its long-press count, for a slave's links. False unless `id` is an input device.
+  bool inputSnapshot(const char* id, bool& active, uint32_t& longs) const;
 
   // Replace every device with `list` (already parsed). Validates all of it first; on any failure nothing
   // changes. The swap itself happens in loop() and ends with restartRequested() turning true.

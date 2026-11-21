@@ -70,6 +70,21 @@ Topics (`<base>` = the base topic, `<id>` = a device id):
 
 `set` payloads by device: relay `on` / `off` / `true` / `false` / `1` / `0` / `toggle`; PWM a percent or `on` / `off`; motor a speed (-100..100), `stop` or `off`; servo an angle. A **retained** message on a `set` topic is ignored (it would replay an old command at every reconnect). Commands go through the same checks as `POST /command`, so a disabled or out-of-range one is counted in `commands_rejected`. MQTT is plain TCP, no TLS, LAN only.
 
+## Role (master / slave)
+
+**ESP32 and ESP32-S3 only.** An ESP8266 build leaves this out to save RAM (`/role` answers 404 and the Network tab shows no Role box): an ESP8266 is always a master. A **master** is the board as before: it owns the relays and answers this API. A **slave** has buttons (input devices) and, when a button event happens, sends a command to a master's REST API. `GET /role` returns the config (`password_set` instead of the password) and a `status` object; `PUT /role` takes any subset (a missing `password` keeps the stored one; a `links` array replaces all links):
+
+```json
+{"role":"slave","host":"192.168.1.50","port":80,"password":"masters-admin-password",
+ "links":[{"input":"btn1","trigger":"press","remote":"valve1","action":"toggle"},
+          {"input":"btn1","trigger":"long","remote":"valve1","action":"off"},
+          {"input":"btn2","trigger":"release","remote":"pwm1","action":"set","value":50}]}
+```
+
+`role` is `master` (default) or `slave`. A slave needs `host` (an IP address or DNS name; a `.local` name does not resolve on the ESP8266) and the master's admin `password`. Up to 8 links; `trigger` is `press`, `long` or `release` (`long` needs a long-press time on the input device); `action` is `toggle`, `on`, `off` or `set` (`value` -100..180). The same button and trigger twice is refused. Errors: `400 invalid_role_config` with `field` (`role`, `host`, `port`, `password`, `format`, `links[<index>]`). `GET /status` also carries the same `role` status.
+
+How the slave talks: it logs in to the master (`POST /session`) once, keeps the token, sends `POST /command` per event, and logs in again on a `401`. One request at a time. **A command that has not been delivered within 10 s is dropped** (master unreachable, busy, wrong password), never sent late. A wrong password stops further login attempts for 10 minutes (five wrong ones lock the master out); a master that still has the factory password is refused (`master_default_password`). Status `state`: `idle`, `logging_in`, `sending`, `ready`; counters `sent`, `rejected` (the master refused it, `last_reject` has its error code), `expired` (dropped late), `dropped` (queue full), `missing_inputs` (links whose button does not exist). The slave holds one of the master's three session slots.
+
 ## Devices
 
 `GET /devices` -> `{"devices":[{"id","name","type","pin",...,"enabled","failsafe_s","state":{...},"props":[...]}]}`. `props` lists what a dashboard component may bind to and whether it is writable.

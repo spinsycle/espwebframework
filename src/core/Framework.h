@@ -12,6 +12,10 @@
 #include "security/AuthManager.h"
 #include "net/MqttManager.h"
 #include "net/NetworkManager.h"
+#include "core/Features.h"
+#if ESPWF_HAS_ROLE
+#include "net/RoleManager.h"
+#endif
 #include "net/WsHub.h"
 
 class FrameworkController {
@@ -39,6 +43,9 @@ class FrameworkController {
   espwf::AuthManager auth_;
   espwf::NetworkManager net_;
   espwf::MqttManager mqtt_;
+#if ESPWF_HAS_ROLE
+  espwf::RoleManager role_;
+#endif
   espwf::HttpApi http_;
   espwf::WsHub ws_;
   uint32_t restartAt_ = 0;

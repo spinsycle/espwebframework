@@ -15,6 +15,8 @@ namespace espwf {
 
 #if defined(ESP8266)
 static constexpr Chip kChip = Chip::Esp8266;
+#elif defined(CONFIG_IDF_TARGET_ESP32S3)
+static constexpr Chip kChip = Chip::Esp32S3;
 #else
 static constexpr Chip kChip = Chip::Esp32;
 #endif
@@ -116,6 +118,15 @@ bool DeviceRegistry::readProp(const char* id, Prop p, double& out) const {
     case Prop::Pressure: out = r.press; return r.ok;
     default: return false;
   }
+}
+
+bool DeviceRegistry::inputSnapshot(const char* id, bool& active, uint32_t& longs) const {
+  hal::CriticalSection cs;
+  int i = find(id);
+  if (i < 0 || cfg_[i].type != DeviceType::Input) return false;
+  active = rt_[i].on;
+  longs = rt_[i].longs;
+  return true;
 }
 
 DevErr DeviceRegistry::requestUpdate(const DeviceConfig& c) {
