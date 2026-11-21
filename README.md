@@ -150,7 +150,7 @@ The same firmware and the same page run on an **ESP32 DevKit (WROOM-32)**. These
 |---|---|
 | ![System tab on an ESP32](docs/img/esp32-03-system.png) | ![Diagnostics tab on an ESP32](docs/img/esp32-04-diagnostics.png) |
 
-What has been checked on the ESP32: it boots, serves the dashboard, joins Wi-Fi and runs the device registry, including the PING))) sensor. What has not: the per-phase hardware checklists row by row, and a long soak (the ESP8266 had both). The ESP32-S3 target is compile-checked only. See [Project status](#project-status).
+What has been checked on the ESP32: it boots, serves the dashboard, joins Wi-Fi and runs the device registry. What has not: the PING))) sensor reading a real distance (the driver is built and tested natively, but no sensor has been connected to the board yet), the per-phase hardware checklists row by row, and a long soak (the ESP8266 had both). The ESP32-S3 target is compile-checked only. See [Project status](#project-status).
 
 ## Supported hardware and devices
 
@@ -210,7 +210,7 @@ Read [docs/SAFETY.md](docs/SAFETY.md) before connecting anything that can hurt s
 
 ## Project status
 
-Latest release 1.0.1; the `main` branch also carries mDNS, MQTT, master / slave, ESP32-S3 support and the PING))) sensor (see the [changelog](CHANGELOG.md), "Unreleased"). Verified on an ESP8266 NodeMCU: every build phase passed its hardware checklist. It has also been run on an ESP32 DevKit (boots, serves the dashboard, devices and the PING))) sensor work), but the per-phase ESP32 checklists are not ticked row by row and there has been no ESP32 soak. The ESP32-S3 build compiles and passes the native tests but has not been run on a board. Two 24-hour soak runs (on the ESP8266) showed a flat heap but occasional external resets and HTTP stalls that recovered by themselves; the cause is not pinned down and is written up in the [changelog](CHANGELOG.md) and [safety notes](docs/SAFETY.md). The `/api/v1` surface and the `schema_version` 1 config format are frozen: additions only.
+Latest release 1.0.1; the `main` branch also carries mDNS, MQTT, master / slave, ESP32-S3 support and the PING))) sensor (see the [changelog](CHANGELOG.md), "Unreleased"). Verified on an ESP8266 NodeMCU: every build phase passed its hardware checklist. It has also been run on an ESP32 DevKit (boots, serves the dashboard, the device registry works; the PING))) sensor has not been tried on hardware yet), but the per-phase ESP32 checklists are not ticked row by row and there has been no ESP32 soak. The ESP32-S3 build compiles and passes the native tests but has not been run on a board. Two 24-hour soak runs (on the ESP8266) showed a flat heap but occasional external resets and HTTP stalls that recovered by themselves; the cause is not pinned down and is written up in the [changelog](CHANGELOG.md) and [safety notes](docs/SAFETY.md). The `/api/v1` surface and the `schema_version` 1 config format are frozen: additions only.
 
 ## Development
 

@@ -8,7 +8,7 @@ Sensor model `ping`: Parallax PING))) (28015) ultrasonic distance sensor. Additi
 - The sensor runs on 5 V and its echo is 5 V: a divider or level shifter is needed on the signal pin ([DRIVERS.md](docs/DRIVERS.md)).
 - `kModelCount` is now 3, and `ping` is a sensor model only (a servo with model 2 is `bad_model`). Native tests 297, 14 new mutants.
 
-Run on an ESP32 DevKit (WROOM-32) for the first time: the dashboard, devices, network and the `ping` sensor work on the board (2026-11-21). The per-phase ESP32 hardware checklists are still not ticked row by row.
+Run on an ESP32 DevKit (WROOM-32) for the first time: the dashboard, network and the device registry work on the board (2026-11-21; a direct servo was added on GPIO 18). The `ping` sensor has not yet read a distance on hardware: no sensor was connected, so every read fails as expected. The per-phase ESP32 hardware checklists are still not ticked row by row.
 
 mDNS (F1 of the v1.1 plan). Additive: `network.json` gains `mdns.enabled` (default off) and `mdns.name`; old files load unchanged, schema stays 1, no route or error-code change.
 - Network tab: "Name on your network (mDNS)" checkbox and name; `relays` -> `http://relays.local`. Runs only with the Wi-Fi client connected; off means no responder and nothing else changes.
