@@ -80,4 +80,4 @@ Lost the password or locked out by a bad AP password: re-flash the filesystem (`
 Sign in, System tab, Firmware update: choose the `.pio/build/<env>/firmware.bin` from your app build. The board checks the file and restarts. Settings are kept.
 
 ## Check your build
-In the framework repo, `powershell -File tools/gate.ps1` builds both chips and both filesystem images and runs all native tests. With a board on your network, `tools/api_smoke.ps1 -Ip <address> -Password <pw>` exercises the whole API (about 4 minutes; wait 3 minutes between runs).
+In the framework repo, `powershell -File tools/gate.ps1` builds all three targets (ESP8266, ESP32, ESP32-S3), their filesystem images and every example, and runs all native tests. With a board on your network, `tools/api_smoke.ps1 -Ip <address> -Password <pw>` exercises the whole API (about 4 minutes; wait 3 minutes between runs).

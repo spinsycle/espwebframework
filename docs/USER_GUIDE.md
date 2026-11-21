@@ -68,6 +68,7 @@ In **Auto** mode the dashboard builds itself from the device list. Add a device 
 | PWM, servo | Slider |
 | Motor | Slider (negative = reverse) plus a Stop button |
 | Temperature or pressure sensor | Number display (a BME280 gets three: temperature, humidity, pressure) |
+| PING))) distance sensor | Number display in cm |
 | Input | Status light |
 | Serial device | Device card with a text box |
 
@@ -141,6 +142,7 @@ If the board refuses, the message under the button names the problem, for exampl
 - **Servo calibration.** Pulse at 0 and 180 degrees (`500` and `2400` by default) are tuning knobs. Adjust them per servo if it buzzes or stops short of its end.
 - **PCA9685 servos and BME280 sensors use the I2C bus**, not a pin: pick the board address and channel instead.
 - **Max 8 PWM-timed outputs** in total (PWM, motor, and directly driven servos).
+- **PING))) ultrasonic sensor.** Choose type Sensor and chip "Parallax PING))) ultrasonic": one signal pin does both trigger and echo. The sensor runs on 5 V and its echo is 5 V, so put a level shifter or a divider between it and the GPIO (see [DRIVERS.md](DRIVERS.md)). It reads about 2 cm to 3.2 m, once per "Read every" seconds (1 at the fastest).
 
 ### Failsafe
 
@@ -232,6 +234,12 @@ Under **Access point** set the network name, password, channel and the board's a
 
 Password boxes show `unchanged` when blank, and keep the current password. **Show** reveals what you typed, so check it before saving.
 
+Further down the same tab:
+
+- **Name on your network (mDNS)**: tick it and give a name, and the board answers at `http://<name>.local` while the Wi-Fi client is connected. Off by default.
+- **MQTT**: broker host, port, user, password and base topic. When enabled the board publishes each device's state, retained, to `<base>/<id>/state` and accepts commands on `<base>/<id>/set`. Off by default.
+- **Role** (ESP32 and ESP32-S3 only): make the board a **slave** whose buttons send commands to a **master** board's API. An ESP8266 is always a master and shows no Role box.
+
 Press **Save and apply**. The board changes network after the reply goes out, so the page loses contact: reconnect to the board and open it again at its new address.
 
 > **Typing a wrong access-point password can lock you out.** If you cannot reach the board in any mode, re-flash the filesystem (`uploadfs`), which returns it to the factory settings and the factory password.
@@ -273,13 +281,14 @@ Both the phone and the board must be on the same network (or the phone joined to
 
 ## 10. Limits
 
-| | ESP8266 | ESP32 |
-|---|---|---|
-| Devices | 16 | 32 |
-| PWM-timed outputs (PWM, motor, direct servo) | 8 | 8 |
-| Serial devices | 1 | 1 |
-| Sessions signed in | 3 | 3 |
-| Live (WebSocket) pages | 3 | 3 |
+| | ESP8266 | ESP32 | ESP32-S3 |
+|---|---|---|---|
+| Devices | 16 | 32 | 32 |
+| PWM-timed outputs (PWM, motor, direct servo) | 8 | 8 | 8 (one shared frequency) |
+| Serial devices | 1 | 1 | 1 |
+| Sessions signed in | 3 | 3 | 3 |
+| Live (WebSocket) pages | 3 | 3 | 3 |
+| Master / slave role | no (always a master) | yes | yes |
 
 Automation: 16 rules, 3 conditions and 4 actions per rule, 4 interlocks, 4 sequences of up to 16 steps (32 steps in all), 6 timers. Dashboard: 32 components, 6 tabs, 6000 bytes.
 

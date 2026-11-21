@@ -7,6 +7,7 @@ A reusable firmware library that turns an **ESP8266 NodeMCU**, an **ESP32 DevKit
 - [Features](#features)
 - [Quick start](#quick-start)
 - [Tour of the web interface](#tour-of-the-web-interface)
+- [Running on an ESP32](#running-on-an-esp32)
 - [Supported hardware and devices](#supported-hardware-and-devices)
 - [Example apps](#example-apps)
 - [Documentation](#documentation)
@@ -18,10 +19,11 @@ A reusable firmware library that turns an **ESP8266 NodeMCU**, an **ESP32 DevKit
 ## Features
 
 - **Wi-Fi setup in the browser.** The board starts its own access point, joins your home network, or does both. The dashboard is plain HTML/JS gzipped into the board's filesystem.
-- **Device registry with drivers.** Relay, input, PWM, DC motor, servo (direct or through a PCA9685), DS18B20 and BME280 sensors, and a serial port. Add, edit, disable and remove devices from the page; pins are checked for conflicts and boot-sensitive GPIOs.
+- **Device registry with drivers.** Relay, input, PWM, DC motor, servo (direct or through a PCA9685), DS18B20, BME280 and Parallax PING))) ultrasonic sensors, and a serial port. Add, edit, disable and remove devices from the page; pins are checked for conflicts and boot-sensitive GPIOs.
 - **Dashboard that builds itself.** Auto mode makes a control for every device. Manual mode gives you a layout editor with toggles, sliders, joysticks, gauges, graphs, dropdowns, timers, tabs and more.
 - **Automation on the board.** Rules (trigger, conditions, actions), timed sequences, countdown timers, and relay interlocks. They keep running with no browser open. Time-of-day schedules use NTP.
 - **APIs.** REST under `/api/v1` and a WebSocket at `/ws` for live state, both documented and frozen for 1.x.
+- **Network integrations.** Optional mDNS name (`http://<name>.local`), MQTT publish and subscribe, and a master / slave mode (ESP32 family) where a board's buttons control another board over REST. All off by default.
 - **Safety nets.** Per-device failsafes with a dashboard heartbeat, per-device enable/disable, a hardware watchdog, login lockout, diagnostics and an event log.
 - **Maintenance built in.** Admin password with sessions, authenticated over-the-air firmware update (MD5 checked), JSON config on LittleFS with export, import and factory reset.
 
@@ -80,7 +82,6 @@ python -m platformio run -e nodemcuv2 -t uploadfs
 ```
 
 Use `-e esp32dev` for an ESP32 or `-e esp32s3` for an ESP32-S3.
-
 **4. Sign in.** Join the board's Wi-Fi `ESPWF-xxxxxx` (password `espframework`), open `http://192.168.73.1`, sign in with the factory password, and choose a new one. Then add your home Wi-Fi on the Network tab and start adding devices.
 
 Full walkthrough: [docs/INSTALL.md](docs/INSTALL.md). The fastest way in is to copy an [example app](#example-apps).
@@ -137,6 +138,20 @@ The page is responsive, so a phone or tablet is the controller in the field.
 
 ![Dashboard on a phone](docs/img/12-phone.png)
 
+## Running on an ESP32
+
+The same firmware and the same page run on an **ESP32 DevKit (WROOM-32)**. These screenshots are from a real board, flashed with `-e esp32dev` and reached over its home-network address (network name, address and chip ID masked). The board is fresh, so there are no devices yet; the add-device form already offers the new Parallax PING))) sensor.
+
+| Dashboard | Add a PING))) sensor |
+|---|---|
+| ![Dashboard served by an ESP32](docs/img/esp32-01-dashboard.png) | ![Add device form with the PING))) chip selected](docs/img/esp32-02-add-ping-sensor.png) |
+
+| System: chip ESP32 @ 240 MHz | Diagnostics |
+|---|---|
+| ![System tab on an ESP32](docs/img/esp32-03-system.png) | ![Diagnostics tab on an ESP32](docs/img/esp32-04-diagnostics.png) |
+
+What has been checked on the ESP32: it boots, serves the dashboard, joins Wi-Fi and runs the device registry, including the PING))) sensor. What has not: the per-phase hardware checklists row by row, and a long soak (the ESP8266 had both). The ESP32-S3 target is compile-checked only. See [Project status](#project-status).
+
 ## Supported hardware and devices
 
 | | ESP8266 (NodeMCU) | ESP32 (DevKit WROOM-32) | ESP32-S3 (DevKitC-1) |
@@ -154,7 +169,7 @@ The page is responsive, so a phone or tablet is the controller in the field.
 | PWM | Sliders, LEDs, fans |
 | Motor | H-bridge, signed speed, stop, failsafe |
 | Servo | Direct or via PCA9685, per-servo pulse calibration |
-| Sensors | DS18B20 (1-Wire), BME280 (I2C: temperature, humidity, pressure) |
+| Sensors | DS18B20 (1-Wire), BME280 (I2C: temperature, humidity, pressure), Parallax PING))) ultrasonic (one signal pin, distance in cm; 5 V part, needs a level shifter) |
 | Serial | One text port, send and receive |
 
 Automation limits: 16 rules (3 conditions, 4 actions each), 4 interlocks, 4 sequences (32 steps in all), 6 timers. Dashboard: 32 components, 6 tabs. Details in [docs/DRIVERS.md](docs/DRIVERS.md) and the [user guide](docs/USER_GUIDE.md#10-limits).
@@ -195,7 +210,7 @@ Read [docs/SAFETY.md](docs/SAFETY.md) before connecting anything that can hurt s
 
 ## Project status
 
-Version 1.0.1. Verified on an ESP8266 NodeMCU: every build phase passed its hardware checklist. The ESP32 build compiles and passes the native tests; its hardware checklists are still open because it has not been run on a board yet. Two 24-hour soak runs showed a flat heap but occasional external resets and HTTP stalls that recovered by themselves; the cause is not pinned down and is written up in the [changelog](CHANGELOG.md) and [safety notes](docs/SAFETY.md). The `/api/v1` surface and the `schema_version` 1 config format are frozen: additions only.
+Latest release 1.0.1; the `main` branch also carries mDNS, MQTT, master / slave, ESP32-S3 support and the PING))) sensor (see the [changelog](CHANGELOG.md), "Unreleased"). Verified on an ESP8266 NodeMCU: every build phase passed its hardware checklist. It has also been run on an ESP32 DevKit (boots, serves the dashboard, devices and the PING))) sensor work), but the per-phase ESP32 checklists are not ticked row by row and there has been no ESP32 soak. The ESP32-S3 build compiles and passes the native tests but has not been run on a board. Two 24-hour soak runs (on the ESP8266) showed a flat heap but occasional external resets and HTTP stalls that recovered by themselves; the cause is not pinned down and is written up in the [changelog](CHANGELOG.md) and [safety notes](docs/SAFETY.md). The `/api/v1` surface and the `schema_version` 1 config format are frozen: additions only.
 
 ## Development
 
@@ -203,7 +218,7 @@ Run these from a checkout of this repository.
 
 | Command | Does |
 |---|---|
-| `powershell -File tools/gate.ps1` | Builds both chips, every example and both filesystem images, and runs the native tests |
+| `powershell -File tools/gate.ps1` | Builds all three targets, every example and the filesystem images, and runs the native tests |
 | `python tools/mutate_devices.py` | Mutation check of the device logic |
 | `python tools/check_frozen.py` | Fails if a frozen API item was removed or renamed |
 | `tools/api_smoke.ps1 -Ip <address> -Password <pw>` | Exercises the whole API on a live board (about 4 minutes) |
