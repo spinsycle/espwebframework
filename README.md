@@ -140,17 +140,19 @@ The page is responsive, so a phone or tablet is the controller in the field.
 
 ## Running on an ESP32
 
-The same firmware and the same page run on an **ESP32 DevKit (WROOM-32)**. These screenshots are from a real board, flashed with `-e esp32dev` and reached over its home-network address (network name, address and chip ID masked). The board is fresh, so there are no devices yet; the add-device form already offers the new Parallax PING))) sensor.
+The same firmware and the same page run on an **ESP32 DevKit (WROOM-32)**. These screenshots are from a real board, flashed with `-e esp32dev` and reached over its home-network address (network name, address and chip ID masked). The board has one device, a direct servo on GPIO 18, and its slider appears on the dashboard by itself. The add-device form already offers the new Parallax PING))) sensor (shown filled in, not submitted: no sensor was connected). The System and Diagnostics shots were taken before the servo was added, so their device lists are empty.
 
-| Dashboard | Add a PING))) sensor |
+| Dashboard | Devices |
 |---|---|
-| ![Dashboard served by an ESP32](docs/img/esp32-01-dashboard.png) | ![Add device form with the PING))) chip selected](docs/img/esp32-02-add-ping-sensor.png) |
+| ![Dashboard served by an ESP32, with a servo slider](docs/img/esp32-01-dashboard.png) | ![Devices tab on an ESP32, with the servo card](docs/img/esp32-05-devices.png) |
 
-| System: chip ESP32 @ 240 MHz | Diagnostics |
+| Add a PING))) sensor | System: chip ESP32 @ 240 MHz |
 |---|---|
-| ![System tab on an ESP32](docs/img/esp32-03-system.png) | ![Diagnostics tab on an ESP32](docs/img/esp32-04-diagnostics.png) |
+| ![Add device form with the PING))) chip selected](docs/img/esp32-02-add-ping-sensor.png) | ![System tab on an ESP32](docs/img/esp32-03-system.png) |
 
-What has been checked on the ESP32: it boots, serves the dashboard, joins Wi-Fi and runs the device registry. What has not: the PING))) sensor reading a real distance (the driver is built and tested natively, but no sensor has been connected to the board yet), the per-phase hardware checklists row by row, and a long soak (the ESP8266 had both). The ESP32-S3 target is compile-checked only. See [Project status](#project-status).
+![Diagnostics tab on an ESP32](docs/img/esp32-04-diagnostics.png)
+
+What has been checked on the ESP32: it boots, serves the dashboard, joins Wi-Fi and runs the device registry (the servo was added from the page). The servo's physical movement was not recorded in these shots. What has not: the PING))) sensor reading a real distance (the driver is built and tested natively, but no sensor has been connected to the board yet), the per-phase hardware checklists row by row, and a long soak (the ESP8266 had both). The ESP32-S3 target is compile-checked only. See [Project status](#project-status).
 
 ## Supported hardware and devices
 
