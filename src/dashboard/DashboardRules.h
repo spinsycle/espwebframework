@@ -24,7 +24,7 @@ constexpr int kMaxSpan = 4;
 
 // ---- what a device offers ------------------------------------------------------------------------
 
-enum class Prop : uint8_t { None = 0, State, Level, Temp, Humidity, Pressure, Text, Count, Ok, kCount };
+enum class Prop : uint8_t { None = 0, State, Level, Temp, Humidity, Pressure, Text, Count, Ok, Distance, kCount };
 
 inline const char* propName(Prop p) {
   switch (p) {
@@ -36,6 +36,7 @@ inline const char* propName(Prop p) {
     case Prop::Text: return "text";
     case Prop::Count: return "count";
     case Prop::Ok: return "ok";
+    case Prop::Distance: return "distance_cm";
     default: return "";
   }
 }
@@ -61,6 +62,7 @@ inline size_t deviceProps(const DeviceConfig& d, PropAccess* out) {
     case DeviceType::Motor:
     case DeviceType::Servo: out[n++] = {Prop::Level, true}; break;
     case DeviceType::Sensor:
+      if (d.model == 2) { out[n++] = {Prop::Distance, false}; out[n++] = {Prop::Ok, false}; break; }  // PING))) has no temperature
       out[n++] = {Prop::Temp, false};
       if (d.model == 1) { out[n++] = {Prop::Pressure, false}; out[n++] = {Prop::Humidity, false}; }
       out[n++] = {Prop::Ok, false};
@@ -145,7 +147,7 @@ inline bool needAccepts(Need n, Prop p, bool write) {
     case Need::WriteState: return p == Prop::State && write;
     case Need::WriteLevel: return p == Prop::Level && write;
     case Need::ReadNumber:
-      return p == Prop::Level || p == Prop::Temp || p == Prop::Humidity || p == Prop::Pressure || p == Prop::Count;
+      return p == Prop::Level || p == Prop::Temp || p == Prop::Humidity || p == Prop::Distance || p == Prop::Pressure || p == Prop::Count;
     case Need::ReadState: return p == Prop::State || p == Prop::Ok;
     case Need::ReadText: return p == Prop::Text;
     default: return false;

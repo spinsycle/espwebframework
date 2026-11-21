@@ -58,6 +58,23 @@ void test_device_props() {
   EQ(Prop::Text, a[0].prop);
 }
 
+void test_ping_props() {
+  DeviceConfig p;
+  strcpy(p.id, "dist");
+  p.type = DeviceType::Sensor;
+  p.model = 2;
+  p.pin = 12;
+  PropAccess a[5];
+  EQ(2, deviceProps(p, a));  // distance and ok, no temperature
+  EQ(Prop::Distance, a[0].prop);
+  EQ(Prop::Ok, a[1].prop);
+  bool w = true;
+  TEST_ASSERT_TRUE(devicePropAccess(p, Prop::Distance, w));
+  TEST_ASSERT_FALSE(w);
+  TEST_ASSERT_FALSE(devicePropAccess(p, Prop::Temp, w));
+  TEST_ASSERT_EQUAL_STRING("distance_cm", propName(Prop::Distance));
+}
+
 void test_prop_names_round_trip() {
   for (uint8_t i = 1; i < uint8_t(Prop::kCount); i++) {
     Prop p;
@@ -104,6 +121,7 @@ void test_need_accepts() {
   TEST_ASSERT_TRUE(needAccepts(Need::ReadNumber, Prop::Humidity, false));
   TEST_ASSERT_TRUE(needAccepts(Need::ReadNumber, Prop::Pressure, false));
   TEST_ASSERT_TRUE(needAccepts(Need::ReadNumber, Prop::Count, false));
+  TEST_ASSERT_TRUE(needAccepts(Need::ReadNumber, Prop::Distance, false));
   TEST_ASSERT_TRUE(needAccepts(Need::ReadNumber, Prop::Level, true));
   TEST_ASSERT_FALSE(needAccepts(Need::ReadNumber, Prop::State, false));
   TEST_ASSERT_FALSE(needAccepts(Need::ReadNumber, Prop::Text, false));
@@ -457,6 +475,7 @@ void test_error_names() {
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_device_props);
+  RUN_TEST(test_ping_props);
   RUN_TEST(test_prop_names_round_trip);
   RUN_TEST(test_comp_names_round_trip);
   RUN_TEST(test_levels);

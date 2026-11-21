@@ -46,6 +46,7 @@ bool DeviceRegistry::view(size_t i, DeviceView& out) const {
   out.temp = r.temp;
   out.hum = r.hum;
   out.press = r.press;
+  out.dist = r.dist;
   out.tripped = r.tripped;
   out.errs = r.errs;
   if (cfg_[i].type == DeviceType::Serial) {
@@ -116,6 +117,7 @@ bool DeviceRegistry::readProp(const char* id, Prop p, double& out) const {
     case Prop::Temp: out = r.temp; return r.ok;
     case Prop::Humidity: out = r.hum; return r.ok && r.hasHum;
     case Prop::Pressure: out = r.press; return r.ok;
+    case Prop::Distance: out = r.dist; return r.ok;
     default: return false;
   }
 }
@@ -234,7 +236,8 @@ void DeviceRegistry::describeState(const DeviceView& v, JsonObject st) {
     case DeviceType::Servo: st["angle"] = v.val; break;
     case DeviceType::Sensor:
       st["ok"] = v.ok;
-      if (v.ok) {
+      if (v.ok && v.cfg.model == 2) st["distance_cm"] = v.dist;
+      else if (v.ok) {
         st["temp_c"] = v.temp;
         if (v.cfg.model == 1) {
           st["pressure_hpa"] = v.press;
@@ -328,7 +331,8 @@ void DeviceRegistry::startHw(size_t i) {
     case DeviceType::Sensor:
       r.next = millis();
       if (c.model == 0) r.h = drv::dsBegin(c.pin);
-      else drv::i2cStart(kChip);
+      else if (c.model == 1) drv::i2cStart(kChip);
+      else pinMode(c.pin, INPUT);  // PING))) idles as an input; pingRead() flips it for the trigger
       break;
     case DeviceType::Serial:
       hal::uartBegin(c.pin, c.pin2, c.baud);
@@ -623,12 +627,33 @@ void DeviceRegistry::sensorSet(size_t i, float t, float h, float p, uint32_t now
   stateVer_ = stateVer_ + 1;
 }
 
+void DeviceRegistry::pingSet(size_t i, float cm, uint32_t now) {
+  Runtime& r = rt_[i];
+  cm = round1(cm);
+  bool changed = !r.ok || cm != r.dist;
+  r.fails = 0;
+  r.phase = 0;
+  r.next = now + uint32_t(cfg_[i].intervalS) * 1000u;
+  if (!changed) return;
+  hal::CriticalSection cs;
+  r.ok = true;
+  r.dist = cm;
+  stateVer_ = stateVer_ + 1;
+}
+
 void DeviceRegistry::pollSensors() {
   uint32_t now = millis();
   for (size_t i = 0; i < n_; i++) {
     if (cfg_[i].type != DeviceType::Sensor || !cfg_[i].enabled) continue;
     const DeviceConfig& c = cfg_[i];
     Runtime& r = rt_[i];
+    if (c.model == 2) {  // PING))) : one blocking read (<= ~25 ms) when due, no conversion phase
+      if (int32_t(now - r.next) < 0) continue;
+      float cm;
+      if (drv::pingRead(c.pin, cm)) pingSet(i, cm, now);
+      else sensorFail(i, now);
+      continue;
+    }
     bool bme = c.model == 1;
     if (r.phase == 0) {
       if (int32_t(now - r.next) < 0) continue;

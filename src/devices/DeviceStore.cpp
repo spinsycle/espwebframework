@@ -141,7 +141,7 @@ void toJson(const DeviceConfig& c, JsonObject out) {
       out["max_us"] = c.maxUs;
       out["initial"] = c.initial;
       break;
-    case DeviceType::Sensor:
+    case DeviceType::Sensor:  // model is written by name, so 'ping' needs no change here
       out["model"] = modelName(c.type, c.model);
       if (c.model == 1) out["i2c_addr"] = c.i2cAddr;
       out["interval_s"] = c.intervalS;

@@ -8,7 +8,7 @@ let adraft = null, aisNew = false, atimer = 0;
 let aseq = null, aseqNew = false, atim = null, atimNew = false;
 
 const WEEK = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const PN = { state: "on/off", level: "level", temp_c: "temperature", humidity: "humidity", pressure_hpa: "pressure", count: "count", ok: "reading ok" };
+const PN = { state: "on/off", level: "level", temp_c: "temperature", humidity: "humidity", pressure_hpa: "pressure", count: "count", ok: "reading ok", distance_cm: "distance (cm)" };
 const TRIG = { change: "A value changes", when: "Conditions become true", interval: "Every so often", schedule: "At a time of day", startup: "When the board starts", wifi: "Wi-Fi connects or drops", manual: "Run by hand only", timer: "A timer finishes", sequence: "A sequence finishes or stops" };
 const ACT = { on: "Turn on", off: "Turn off", toggle: "Toggle", set: "Set value", stop: "Stop", send: "Send text", event: "Send an event", seq_start: "Start", seq_stop: "Stop", timer_start: "Start", timer_stop: "Stop" };
 const seqs = () => acfg.sequences || [];

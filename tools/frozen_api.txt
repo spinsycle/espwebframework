@@ -133,6 +133,7 @@ modelName: bme280
 modelName: direct
 modelName: ds18b20
 modelName: pca9685
+modelName: ping
 netModeName: ap
 netModeName: ap_sta
 netModeName: sta
@@ -157,6 +158,7 @@ parseNetMode: ap
 parseNetMode: ap_sta
 parseNetMode: sta
 propName: count
+propName: distance_cm
 propName: humidity
 propName: level
 propName: ok

@@ -78,11 +78,12 @@ inline bool parseDeviceType(const char* s, DeviceType& out) {
   return false;
 }
 
-// Servo: 0 = pin driven directly, 1 = channel on a PCA9685. Sensor: 0 = DS18B20 (1-Wire), 1 = BME280 / BMP280.
-constexpr uint8_t kModelCount = 2;
+// Servo: 0 = pin driven directly, 1 = channel on a PCA9685. Sensor: 0 = DS18B20 (1-Wire), 1 = BME280 / BMP280,
+// 2 = Parallax PING))) ultrasonic (one signal pin, trigger and echo share it). Append only.
+constexpr uint8_t kModelCount = 3;
 inline const char* modelName(DeviceType t, uint8_t m) {
   if (t == DeviceType::Servo) return m ? "pca9685" : "direct";
-  return m ? "bme280" : "ds18b20";
+  return m == 2 ? "ping" : m ? "bme280" : "ds18b20";
 }
 inline bool parseModel(DeviceType t, const char* s, uint8_t& out) {
   if (!s) return false;
@@ -266,7 +267,7 @@ inline size_t pinsOf(const DeviceConfig& c, Chip chip, int8_t* out) {
       break;
     case DeviceType::Serial: out[n++] = c.pin; out[n++] = c.pin2; break;
     case DeviceType::Servo: if (c.model == 0) out[n++] = c.pin; break;
-    case DeviceType::Sensor: if (c.model == 0) out[n++] = c.pin; break;
+    case DeviceType::Sensor: if (c.model != 1) out[n++] = c.pin; break;  // DS18B20 and PING))) own a pin, BME280 is on I2C
     default: out[n++] = c.pin; break;
   }
   if (isI2cDevice(c)) { out[n++] = int8_t(i2cSda(chip)); out[n++] = int8_t(i2cScl(chip)); }
@@ -308,8 +309,8 @@ inline DevErr validateDevice(const DeviceConfig& c, Chip chip, const DeviceConfi
   if (!devTerminated(c.id, kIdCap) || !validDeviceId(c.id)) return DevErr::Id;
   if (!devTerminated(c.name, kNameCap)) return DevErr::Name;
   if (uint8_t(c.type) > uint8_t(DeviceType::Serial)) return DevErr::Type;
-  if (c.model >= kModelCount) return DevErr::Model;
-  if (n - (skip >= 0 ? 1 : 0) >= kMaxDevices) return DevErr::Full;
+  if (c.model >= kModelCount || (c.type != DeviceType::Sensor && c.model > 1)) return DevErr::Model;  // 'ping' is a sensor model only
+  if (n -(skip >= 0 ? 1 : 0) >= kMaxDevices) return DevErr::Full;
 
   size_t pwmCount = 0, serialCount = 0;
   for (size_t i = 0; i < n; i++) {
@@ -341,7 +342,7 @@ inline DevErr validateDevice(const DeviceConfig& c, Chip chip, const DeviceConfi
       uses[nu++] = {c.pin2, PinRole::Output};
       break;
     case DeviceType::Servo: if (c.model == 0) uses[nu++] = {c.pin, PinRole::Pwm}; break;
-    case DeviceType::Sensor: if (c.model == 0) uses[nu++] = {c.pin, PinRole::Output}; break;  // 1-Wire drives the line
+    case DeviceType::Sensor: if (c.model != 1) uses[nu++] = {c.pin, PinRole::Output}; break;  // 1-Wire and PING))) both drive the line
     default: uses[nu++] = {c.pin, PinRole::Output}; break;
   }
   for (size_t u = 0; u < nu; u++) {

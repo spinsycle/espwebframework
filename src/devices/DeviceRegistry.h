@@ -20,6 +20,7 @@ struct DeviceView {  // a copy of one device, safe to read outside any lock
   bool ok = false;       // sensor: last reading is good
   bool hasHum = false;   // sensor: the chip reports humidity (BME280, not BMP280)
   float temp = 0, hum = 0, press = 0;
+  float dist = 0;        // sensor 'ping': distance in cm
   char text[kTextCap] = {0};  // serial: last line received
   bool tripped = false;  // failsafe fired and no command has arrived since
   uint16_t errs = 0;     // sensor: failed readings since boot
@@ -89,7 +90,7 @@ class DeviceRegistry {
     bool ok = false, hasHum = false, ready = false;
     uint8_t phase = 0, fails = 0;  // phase 0 = idle, 1 = waiting for a conversion
     uint32_t next = 0, t0 = 0;
-    float temp = 0, hum = 0, press = 0;
+    float temp = 0, hum = 0, press = 0, dist = 0;
     void* h = nullptr;  // DS18B20 line handle
   };
   struct Op {
@@ -121,6 +122,7 @@ class DeviceRegistry {
   void pollSensors();
   void sensorFail(size_t i, uint32_t now);
   void sensorSet(size_t i, float t, float h, float p, uint32_t now);
+  void pingSet(size_t i, float cm, uint32_t now);
   void pollSerial();
   void serialEmit();
   void doScan();

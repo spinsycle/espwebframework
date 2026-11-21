@@ -193,10 +193,59 @@ void test_sensor_validation() {
   EQ(DevErr::I2cAddr, check(bme("b", 0x78), Chip::Esp8266));
   EQ(DevErr::Ok, check(bme("b", 0x77), Chip::Esp8266));
   c = bme("b", 0x76);
-  c.model = 2;
+  c.model = 3;
   EQ(DevErr::Model, check(c, Chip::Esp8266));
   DeviceConfig o[1] = {dev("t", DeviceType::Sensor, 13)};
   EQ(DevErr::PinInUse, check(dev("u", DeviceType::Relay, 13), Chip::Esp8266, o, 1));
+}
+
+// ---- PING))) ultrasonic sensor (sensor model 2)
+
+static DeviceConfig ping(const char* id, int pin) {
+  DeviceConfig c = dev(id, DeviceType::Sensor, pin);
+  c.model = 2;
+  return c;
+}
+
+void test_ping_validation() {
+  EQ(DevErr::Ok, check(ping("p", 12), Chip::Esp8266));
+  EQ(DevErr::PinReserved, check(ping("p", 6), Chip::Esp8266));
+  EQ(DevErr::PinInputOnly, check(ping("p", 34), Chip::Esp32));  // the pin is driven for the trigger
+  EQ(DevErr::Ok, check(ping("p", 12), Chip::Esp8266, nullptr, 0));
+  DeviceConfig o[1] = {ping("p", 12)};
+  EQ(DevErr::PinInUse, check(dev("r", DeviceType::Relay, 12), Chip::Esp8266, o, 1));
+  EQ(DevErr::PinInUse, check(ping("q", 12), Chip::Esp8266, o, 1));
+  EQ(DevErr::Ok, check(ping("q", 13), Chip::Esp8266, o, 1));
+  DeviceConfig c = ping("p", 12);
+  c.intervalS = 0;
+  EQ(DevErr::Interval, check(c, Chip::Esp8266));
+  // not on the I2C bus, not commandable, not a servo model
+  TEST_ASSERT_FALSE(isI2cDevice(ping("p", 12)));
+  int8_t pins[5];
+  EQ(1, pinsOf(ping("p", 12), Chip::Esp8266, pins));
+  EQ(12, pins[0]);
+  EQ(DevErr::Model, check([] { DeviceConfig s = dev("s", DeviceType::Servo, 13); s.model = 2; return s; }(), Chip::Esp8266));
+}
+
+void test_ping_names() {
+  uint8_t m = 9;
+  TEST_ASSERT_TRUE(parseModel(DeviceType::Sensor, "ping", m)); EQ(2, m);
+  TEST_ASSERT_EQUAL_STRING("ping", modelName(DeviceType::Sensor, 2));
+  TEST_ASSERT_EQUAL_STRING("bme280", modelName(DeviceType::Sensor, 1));  // unchanged
+  TEST_ASSERT_FALSE(parseModel(DeviceType::Servo, "ping", m)) ;
+}
+
+void test_ping_distance() {
+  float cm = 0;
+  TEST_ASSERT_FALSE(pingDistanceCm(0, cm));       // pulseIn timeout
+  TEST_ASSERT_FALSE(pingDistanceCm(114, cm));     // below 2 cm
+  TEST_ASSERT_TRUE(pingDistanceCm(115, cm));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.97f, cm);
+  TEST_ASSERT_TRUE(pingDistanceCm(1166, cm));     // 1166 us is 20 cm
+  TEST_ASSERT_FLOAT_WITHIN(0.05f, 20.0f, cm);
+  TEST_ASSERT_TRUE(pingDistanceCm(18500, cm));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 317.28f, cm);
+  TEST_ASSERT_FALSE(pingDistanceCm(18501, cm));   // past 3.2 m
 }
 
 // ---- serial
@@ -502,6 +551,9 @@ int main(int, char**) {
   RUN_TEST(test_i2c_pins_free);
   RUN_TEST(test_servo_math);
   RUN_TEST(test_sensor_validation);
+  RUN_TEST(test_ping_validation);
+  RUN_TEST(test_ping_names);
+  RUN_TEST(test_ping_distance);
   RUN_TEST(test_serial_validation);
   RUN_TEST(test_pwm_slots_and_frequency);
   RUN_TEST(test_input_long_press_range);

@@ -176,7 +176,8 @@ function devCard(d, bare) {
     const s = d.state;
     if (!s.ok) body.append(el("p", { textContent: "no reading" }));
     else {
-      body.append(el("p", { textContent: s.temp_c.toFixed(1) + " °C" }));
+      if (s.distance_cm !== undefined) body.append(el("p", { textContent: s.distance_cm.toFixed(1) + " cm" }));
+      else body.append(el("p", { textContent: s.temp_c.toFixed(1) + " °C" }));
       if (s.humidity !== undefined) body.append(el("small", { textContent: s.humidity.toFixed(1) + " % RH · " }));
       if (s.pressure_hpa !== undefined) body.append(el("small", { textContent: s.pressure_hpa.toFixed(1) + " hPa" }));
     }
@@ -242,7 +243,7 @@ function syncDevForm() {
   const keys = [t, pca ? "pca" : "", bme ? "bme" : ""];
   $("devform").querySelectorAll("[data-for]").forEach((d) => (d.hidden = !d.dataset.for.split(" ").some((k) => keys.includes(k))));
   $("pinbox").hidden = $("pinbox").hidden || pca || bme;  // those two sit on the I2C bus, not a pin
-  $("pinlabel").textContent = PINLABEL[t] || "GPIO pin";
+  $("pinlabel").textContent = t === "sensor" && f.xmodel.value === "ping" ? "Signal pin (via level shifter, 5 V sensor)" : PINLABEL[t] || "GPIO pin";
   $("pin2label").textContent = t === "serial" ? "TX pin" : "Direction pin (IN1)";
   $("invlabel").textContent = t === "input" ? "Pressed reads low (inverted)" : t === "pwm" ? "Inverted duty" : t === "motor" ? "Reverse direction" : "Active low (relay on = pin low)";
   $("initlabel").textContent = t === "pwm" ? "(duty %)" : t === "servo" ? "(angle, degrees)" : "(0 off, 1 on)";

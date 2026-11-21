@@ -103,6 +103,11 @@ P4 = [
     ("err code addr", 'case DevErr::AddrInUse: return "address_in_use";', 'case DevErr::AddrInUse: return "bad_i2c_addr";'),
     ("err field addr", 'case DevErr::I2cAddr: case DevErr::AddrInUse: return "i2c_addr";', 'case DevErr::I2cAddr: return "i2c_addr";'),
     ("default servo addr", "c.type == DeviceType::Servo ? 0x40 : 0x76", "c.type == DeviceType::Servo ? 0x41 : 0x76"),
+    ("ping model name", 'return m == 2 ? "ping" : m ? "bme280" : "ds18b20";', 'return m == 2 ? "pong" : m ? "bme280" : "ds18b20";'),
+    ("ping model count", "constexpr uint8_t kModelCount = 3;", "constexpr uint8_t kModelCount = 2;"),
+    ("ping pins of", "case DeviceType::Sensor: if (c.model != 1) out[n++] = c.pin; break;", "case DeviceType::Sensor: if (c.model == 0) out[n++] = c.pin; break;"),
+    ("ping pin role", "case DeviceType::Sensor: if (c.model != 1) uses[nu++] = {c.pin, PinRole::Output}; break;", "case DeviceType::Sensor: if (c.model == 0) uses[nu++] = {c.pin, PinRole::Output}; break;"),
+    ("ping not servo model", "(c.type != DeviceType::Sensor && c.model > 1)", "(c.type != DeviceType::Sensor && c.model > 2)"),
 ]
 
 SENSOR = [
@@ -125,6 +130,11 @@ SENSOR = [
     ("ds 85 guard", "if (raw == 0x0550) return false;", ""),
     ("ds scale", "float(raw) / 16.0f", "float(raw) / 8.0f"),
     ("ds crc check", "if (dallasCrc8(s, 8) != s[8]) return false;", ""),
+    ("ping min", "constexpr uint32_t kPingMinUs = 115,", "constexpr uint32_t kPingMinUs = 116,"),
+    ("ping max", "kPingMaxUs = 18500;", "kPingMaxUs = 18600;"),
+    ("ping low guard", "if (us < kPingMinUs || us > kPingMaxUs) return false;", "if (us > kPingMaxUs) return false;"),
+    ("ping high guard", "if (us < kPingMinUs || us > kPingMaxUs) return false;", "if (us < kPingMinUs) return false;"),
+    ("ping scale", "cm = float(us) * 0.01715f;", "cm = float(us) * 0.0343f;"),
 ]
 
 QUEUE = [
@@ -172,6 +182,8 @@ DASH = [
     ("input count", "out[n++] = {Prop::State, false}; out[n++] = {Prop::Count, false}; break;", "out[n++] = {Prop::State, false}; break;"),
     ("sensor bme extras", "if (d.model == 1) { out[n++] = {Prop::Pressure, false}; out[n++] = {Prop::Humidity, false}; }", "if (d.model == 0) { out[n++] = {Prop::Pressure, false}; out[n++] = {Prop::Humidity, false}; }"),
     ("sensor ok", "      out[n++] = {Prop::Ok, false};\n", ""),
+    ("ping props", "if (d.model == 2) { out[n++] = {Prop::Distance, false}; out[n++] = {Prop::Ok, false}; break; }", "if (d.model == 3) { out[n++] = {Prop::Distance, false}; out[n++] = {Prop::Ok, false}; break; }"),
+    ("ping prop name", 'case Prop::Distance: return "distance_cm";', 'case Prop::Distance: return "distance";'),
     ("serial text", "case DeviceType::Serial: out[n++] = {Prop::Text, false}; out[n++] = {Prop::Count, false}; break;", "case DeviceType::Serial: out[n++] = {Prop::Count, false}; break;"),
     ("level motor", "case DeviceType::Motor: lo = -100; hi = 100; return true;", "case DeviceType::Motor: lo = 0; hi = 100; return true;"),
     ("level servo", "case DeviceType::Servo: lo = 0; hi = 180; return true;", "case DeviceType::Servo: lo = 0; hi = 181; return true;"),

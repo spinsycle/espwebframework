@@ -99,4 +99,13 @@ inline bool ds18b20Decode(const uint8_t* s, float& tempC) {
   return true;
 }
 
+// Parallax PING))) (28015): the echo pulse is 115 us (2 cm) to 18.5 ms (3.2 m); outside that, or a timeout (0),
+// there is no usable reading. Speed of sound 343 m/s (20 C), there and back: ~0.18 % off per degree C.
+constexpr uint32_t kPingMinUs = 115, kPingMaxUs = 18500;
+inline bool pingDistanceCm(uint32_t us, float& cm) {
+  if (us < kPingMinUs || us > kPingMaxUs) return false;
+  cm = float(us) * 0.01715f;
+  return true;
+}
+
 }  // namespace espwf

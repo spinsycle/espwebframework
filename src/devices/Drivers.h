@@ -30,5 +30,8 @@ void dsEnd(void* h);
 bool dsConvert(void* h);              // start a conversion; false if nothing answers on the line
 bool dsRead(void* h, float& tC);      // read the result (wait 800 ms after dsConvert); false on a bad CRC
 
+// ---- Parallax PING))) (one pin: trigger out, echo in). Blocks up to ~25 ms per reading; false on no echo.
+bool pingRead(int pin, float& cm);
+
 }  // namespace drv
 }  // namespace espwf

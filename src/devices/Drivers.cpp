@@ -128,5 +128,18 @@ bool dsRead(void* h, float& tC) {
   return ds18b20Decode(s, tC);
 }
 
+// ---- PING))) --------------------------------------------------------------------------------
+
+bool pingRead(int pin, float& cm) {
+  pinMode(pin, OUTPUT);
+  digitalWrite(pin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(pin, HIGH);
+  delayMicroseconds(5);  // 2-5 us trigger pulse
+  digitalWrite(pin, LOW);
+  pinMode(pin, INPUT);   // the sensor now drives the pin: ~750 us hold-off, then the echo pulse
+  return pingDistanceCm(uint32_t(pulseIn(pin, HIGH, 25000)), cm);
+}
+
 }  // namespace drv
 }  // namespace espwf

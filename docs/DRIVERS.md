@@ -35,6 +35,7 @@ A device is a JSON object posted to `/api/v1/devices` (see [API.md](API.md)). Co
 ## Sensor
 - DS18B20: `{"id":"temp","type":"sensor","model":"ds18b20","pin":14,"interval_s":5}` (1-Wire, needs a 4.7k pull-up to 3.3 V).
 - BME280/BMP280: `{"id":"air","type":"sensor","model":"bme280","i2c_addr":118,"interval_s":5}` (0x76 = 118 or 0x77 = 119).
+- Parallax PING))) (28015) ultrasonic: `{"id":"dist","type":"sensor","model":"ping","pin":12,"interval_s":1}`. One signal pin that is both trigger (output) and echo (input). The sensor runs on 5 V and its echo is 5 V: put a divider or level shifter between SIG and the GPIO (ESP pin to a node, 2 k from the node to GND, 1 k from the node to SIG). State is `distance_cm` and `ok`; range about 2 cm to 3.2 m, beyond that or with nothing in front it counts as a failed read (three in a row clear `ok`). Each read blocks `loop()` for up to about 25 ms. Distance assumes 343 m/s (20 C), about 0.18 % off per degree C.
 - `interval_s` 1-3600. State has `temp_c`, `humidity` and `pressure_hpa` (humidity only on a BME280) and `ok` (false after a failed read; the diagnostics table counts read errors since boot). Not commandable.
 
 ## Serial

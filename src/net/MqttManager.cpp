@@ -160,7 +160,8 @@ void MqttManager::publishChanged() {
   for (size_t i = 0; i < n && i < kMax; i++) {
     DeviceView v;
     if (!dev_->view(i, v)) continue;
-    MqttSig s = mqttSig(v.on, v.duty, v.val, v.edges, v.longs, v.ok, v.tripped, v.temp, v.hum, v.press);
+    MqttSig s = mqttSig(v.on, v.duty, v.val, v.edges, v.longs, v.ok, v.tripped,
+                          v.cfg.type == DeviceType::Sensor && v.cfg.model == 2 ? v.dist : v.temp, v.hum, v.press);  // ping: distance rides in the temp slot
     if (rt_->sent[i] && mqttSigSame(rt_->sigs[i], s)) continue;
     char topic[kMqttTopicCap], buf[200];
     JsonDocument d;

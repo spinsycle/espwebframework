@@ -18,8 +18,8 @@ const dev = (id) => devices.find((d) => d.id === id);
 const typeInfo = (name) => (dschema ? dschema.types.find((t) => t.name === name) : null);
 
 const NAMES = { toggle: "Toggle", push_button: "Push button", slider: "Slider", joystick: "Joystick", gauge: "Gauge", numeric: "Number display", status: "Status light", graph: "Graph", text: "Text display", dropdown: "Dropdown", progress: "Progress bar", device_card: "Device card", group_panel: "Group panel", timer: "Timer" };
-const PROPNAMES = { state: "on / off", level: "level", temp_c: "temperature", humidity: "humidity", pressure_hpa: "pressure", text: "text", count: "count", ok: "reading ok" };
-const UNITS = { temp_c: " °C", humidity: " %", pressure_hpa: " hPa" };
+const PROPNAMES = { state: "on / off", level: "level", temp_c: "temperature", humidity: "humidity", pressure_hpa: "pressure", text: "text", count: "count", ok: "reading ok", distance_cm: "distance" };
+const UNITS = { temp_c: " °C", humidity: " %", pressure_hpa: " hPa", distance_cm: " cm" };
 
 // ---- reading a device -----------------------------------------------------------------------------
 
@@ -33,6 +33,7 @@ function propVal(d, p) {
     case "temp_c": return s.temp_c;
     case "humidity": return s.humidity;
     case "pressure_hpa": return s.pressure_hpa;
+    case "distance_cm": return s.distance_cm;
     case "text": return s.last;
     case "count": return d.type === "serial" ? s.rx_lines : s.edges;
     case "ok": return s.ok;
@@ -44,6 +45,7 @@ function propRange(d, p) {
   if (p === "temp_c") return [-10, 50];
   if (p === "humidity") return [0, 100];
   if (p === "pressure_hpa") return [950, 1050];
+  if (p === "distance_cm") return [0, 320];
   return [0, 100];
 }
 
@@ -76,7 +78,7 @@ function autoLayout() {
       out.push(mk(id, "slider", d.name, { device: d.id, property: "level" }, 2, 1));
       out.push(mk(id + "_stop", "push_button", "Stop " + d.name, { device: d.id, action: "stop" }, 1, 1));
     } else if (d.type === "sensor") {
-      out.push(mk(id + "_t", "numeric", d.name, { device: d.id, property: "temp_c" }, 1, 1));
+      out.push(mk(id + "_t", "numeric", d.name, { device: d.id, property: d.model === "ping" ? "distance_cm" : "temp_c" }, 1, 1));
       if (d.model === "bme280") {
         out.push(mk(id + "_h", "numeric", d.name + " humidity", { device: d.id, property: "humidity" }, 1, 1));
         out.push(mk(id + "_p", "numeric", d.name + " pressure", { device: d.id, property: "pressure_hpa" }, 1, 1));
