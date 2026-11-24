@@ -35,6 +35,7 @@ class FrameworkController {
 
   espwf::NetworkManager& network() { return net_; }
   espwf::DeviceRegistry& devices() { return devices_; }
+  AsyncWebServer* server() { return http_.server(); }  // valid after begin(); routes under /api/ are behind the login
 
  private:
   char deviceName_[33] = "ESP Device";

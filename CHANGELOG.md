@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+New example `examples/rgb_led` for an ESP32-S3 with the onboard WS2812 LED: an on/off button and red, green and blue sliders (0-255) on a page at `/rgb`. New accessor `FrameworkController::server()` lets an app add its own routes (routes under `/api/` stay behind the login); no REST, config or error-code change.
+
 Sensor model `ping`: Parallax PING))) (28015) ultrasonic distance sensor. Additive; `model` and property names are append-only, so the frozen list gains `modelName: ping` and `propName: distance_cm` (228 items).
 - One signal pin that is both trigger (output) and echo (input), checked as an output (an ESP32 input-only pin is refused). `{"type":"sensor","model":"ping","pin":12,"interval_s":1}`.
 - State `distance_cm` and `ok`; a new readable property `distance_cm` for dashboard components and automation rules. Range about 2 cm to 3.2 m; no echo or out of range counts as a failed read (three in a row clear `ok`).
