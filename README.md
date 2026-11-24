@@ -186,6 +186,7 @@ Each example is a complete app: `platformio.ini`, one `main.cpp`, and a `seed/` 
 | [`light_sequencer`](examples/light_sequencer) | The automation engine: a repeating LED fade sequence, a countdown timer, and a startup rule. | 1 LED, 1 relay |
 | [`thermostat`](examples/thermostat) | Sensor-driven control with hysteresis: heat on below 20 C, off above 22 C, heater off if the sensor fails. | DS18B20, 1 relay |
 | [`pan_tilt_rover`](examples/pan_tilt_rover) | Drive and aim from the dashboard; failsafes stop the motor and re-centre the servos. | DC motor + H-bridge, 2 servos, PCA9685 |
+| [`rgb_led`](examples/rgb_led) | ESP32-S3 only. A page at `/rgb` with an on/off button and red, green and blue sliders (0-255) for the onboard WS2812 LED. Adds its own routes through `Framework.server()`. | ESP32-S3 with the onboard LED (GPIO48) |
 
 [`examples/smoke`](examples/smoke) is the build and test harness used by the gate, not a demo.
 
@@ -212,7 +213,7 @@ Read [docs/SAFETY.md](docs/SAFETY.md) before connecting anything that can hurt s
 
 ## Project status
 
-Latest release 1.0.1; the `main` branch also carries mDNS, MQTT, master / slave, ESP32-S3 support and the PING))) sensor (see the [changelog](CHANGELOG.md), "Unreleased"). Verified on an ESP8266 NodeMCU: every build phase passed its hardware checklist. It has also been run on an ESP32 DevKit (boots, serves the dashboard, the device registry works; the PING))) sensor has not been tried on hardware yet), but the per-phase ESP32 checklists are not ticked row by row and there has been no ESP32 soak. The ESP32-S3 build compiles and passes the native tests but has not been run on a board. Two 24-hour soak runs (on the ESP8266) showed a flat heap but occasional external resets and HTTP stalls that recovered by themselves; the cause is not pinned down and is written up in the [changelog](CHANGELOG.md) and [safety notes](docs/SAFETY.md). The `/api/v1` surface and the `schema_version` 1 config format are frozen: additions only.
+Latest release 1.0.1; the `main` branch also carries mDNS, MQTT, master / slave, ESP32-S3 support and the PING))) sensor (see the [changelog](CHANGELOG.md), "Unreleased"). Verified on an ESP8266 NodeMCU: every build phase passed its hardware checklist. It has also been run on an ESP32 DevKit (boots, serves the dashboard, the device registry works; the PING))) sensor has not been tried on hardware yet), but the per-phase ESP32 checklists are not ticked row by row and there has been no ESP32 soak. The ESP32-S3 build compiles and passes the native tests; the only thing run on an S3 board so far is the `rgb_led` example (2026-11-23: the on/off button and the three sliders drive the onboard LED), not the per-phase checklists. Two 24-hour soak runs (on the ESP8266) showed a flat heap but occasional external resets and HTTP stalls that recovered by themselves; the cause is not pinned down and is written up in the [changelog](CHANGELOG.md) and [safety notes](docs/SAFETY.md). The `/api/v1` surface and the `schema_version` 1 config format are frozen: additions only.
 
 ## Development
 
